@@ -6,28 +6,24 @@ on:
     tags: [ 'v*' ]
   pull_request:
     branches: [ main, master ]
-  workflow_dispatch: # Allow manual triggers
 
 env:
   GO_VERSION: '1.23'
   BINARY_NAME: 'doc-to-text'
+  CGO_ENABLED: '0'
 
 jobs:
-  # Test job to ensure quality before building
   test:
     name: Test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Fetch full history for version info
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          check-latest: true
 
       - name: Cache Go modules
         uses: actions/cache@v4
@@ -35,9 +31,9 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
           restore-keys: |
-            ${{ runner.os }}-go-
+            ${{ runner.os }}-go-${{ env.GO_VERSION }}-
 
       - name: Download dependencies
         run: go mod download
@@ -48,172 +44,98 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
-      - name: Check go fmt
+      - name: Check formatting
         run: |
           if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
-            echo "The following files are not formatted:"
+            echo "Code is not formatted. Run: gofmt -s -w ."
             gofmt -s -l .
             exit 1
           fi
 
   build:
-    name: Build Binaries
+    name: Build
     runs-on: ubuntu-latest
-    needs: test # Only build if tests pass
+    needs: test
     strategy:
-      fail-fast: false # Don't cancel other builds if one fails
       matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
         include:
-          # Linux builds
-          - goos: linux
-            goarch: amd64
-          - goos: linux
-            goarch: arm64
           - goos: linux
             goarch: arm
             goarm: 7
-          
-          # Windows builds (include ARM64 as it's now widely supported)
+        exclude:
           - goos: windows
-            goarch: amd64
-          - goos: windows
-            goarch: arm64
-          
-          # macOS builds
-          - goos: darwin
-            goarch: amd64
-          - goos: darwin
             goarch: arm64
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Fetch full history for version info
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
-          check-latest: true
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-
-
-      - name: Get comprehensive version info
+      - name: Get version info
         id: version
         run: |
-          # Get version using the same logic as build.sh
-          VERSION=$(git describe --tags --exact-match 2>/dev/null || echo "")
-          
-          if [ -z "$VERSION" ]; then
-            # If no exact tag, use branch and commit info
-            BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
-            COMMIT_SHORT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-            if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
-              VERSION="v1.0.0-dev+${COMMIT_SHORT}"
-            else
-              VERSION="v1.0.0-${BRANCH}+${COMMIT_SHORT}"
-            fi
+          if git describe --tags --exact-match >/dev/null 2>&1; then
+            VERSION=$(git describe --tags --exact-match)
+          else
+            COMMIT_SHORT=$(git rev-parse --short HEAD)
+            VERSION="v1.0.0-dev+${COMMIT_SHORT}"
           fi
           
-          # Get full commit hash
-          GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-          
-          # Build time in ISO 8601 format
+          GIT_COMMIT=$(git rev-parse HEAD)
           BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          
-          # Build environment (GitHub Actions)
-          BUILD_BY="github-actions@${{ github.repository }}"
           
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "git_commit=$GIT_COMMIT" >> $GITHUB_OUTPUT
           echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
-          echo "build_by=$BUILD_BY" >> $GITHUB_OUTPUT
-          
-          # Log version info for debugging
-          echo "🔖 Version Information:"
-          echo "  Version: $VERSION"
-          echo "  Commit: $GIT_COMMIT"
-          echo "  Build Time: $BUILD_TIME"
-          echo "  Built By: $BUILD_BY"
 
       - name: Build binary
         env:
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-          GOARM: ${{ matrix.goarm }}
-          CGO_ENABLED: 0 # Ensure static builds
+          GOARM: ${{ matrix.goarch == 'arm' && matrix.goarm || '' }}
         run: |
-          # Create dist directory
           mkdir -p dist
           
-          # Set output binary name with proper extension
+          # Set binary name with proper extension
           if [ "${{ matrix.goos }}" = "windows" ]; then
-            if [ "${{ matrix.goarch }}" = "arm64" ]; then
-              BINARY_NAME=${{ env.BINARY_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.exe
-            else
-              BINARY_NAME=${{ env.BINARY_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}.exe
-            fi
+            BINARY_NAME="${{ env.BINARY_NAME }}_${{ matrix.goos }}_${{ matrix.goarch }}.exe"
           else
-            if [ "${{ matrix.goarch }}" = "arm" ]; then
-              BINARY_NAME=${{ env.BINARY_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}v${{ matrix.goarm }}
+            if [ "${{ matrix.goarch }}" = "arm" ] && [ -n "${{ matrix.goarm }}" ]; then
+              BINARY_NAME="${{ env.BINARY_NAME }}_${{ matrix.goos }}_${{ matrix.goarch }}v${{ matrix.goarm }}"
             else
-              BINARY_NAME=${{ env.BINARY_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}
+              BINARY_NAME="${{ env.BINARY_NAME }}_${{ matrix.goos }}_${{ matrix.goarch }}"
             fi
           fi
           
-          echo "🔨 Building ${BINARY_NAME}..."
-          
-          # Build with comprehensive version information injection
-          go build -v \
+          # Build with version info
+          go build \
             -ldflags "-s -w \
               -X 'main.Version=${{ steps.version.outputs.version }}' \
               -X 'main.GitCommit=${{ steps.version.outputs.git_commit }}' \
-              -X 'main.BuildTime=${{ steps.version.outputs.build_time }}' \
-              -X 'main.BuildBy=${{ steps.version.outputs.build_by }}'" \
+              -X 'main.BuildTime=${{ steps.version.outputs.build_time }}'" \
             -o "dist/${BINARY_NAME}" .
           
-          # Verify binary was created
-          if [ ! -f "dist/${BINARY_NAME}" ]; then
-            echo "❌ Error: Binary not created"
-            exit 1
-          fi
-          
-          # Test version injection worked
-          echo "🧪 Testing version injection..."
-          ./dist/${BINARY_NAME} --version || echo "⚠️ Version test failed, but binary exists"
-          
-          # Create checksums
+          # Create checksum
           cd dist
           sha256sum "${BINARY_NAME}" > "${BINARY_NAME}.sha256"
-          
-          # Create compressed archives
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            zip "${BINARY_NAME%.exe}.zip" "${BINARY_NAME}" "${BINARY_NAME}.sha256"
-          else
-            tar -czf "${BINARY_NAME}.tar.gz" "${BINARY_NAME}" "${BINARY_NAME}.sha256"
-          fi
-          
-          echo "✅ Build completed successfully"
-          ls -la
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.BINARY_NAME }}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
+          name: ${{ env.BINARY_NAME }}_${{ matrix.goos }}_${{ matrix.goarch }}${{ matrix.goarm && format('v{0}', matrix.goarm) || '' }}
           path: dist/*
           retention-days: 7
 
   release:
-    name: Create Release
+    name: Release
     runs-on: ubuntu-latest
     needs: build
     if: startsWith(github.ref, 'refs/tags/')
@@ -226,180 +148,55 @@ jobs:
         with:
           fetch-depth: 0
         
-      - name: Get release version info
-        id: release_version
-        run: |
-          # Extract version from tag
-          VERSION=${GITHUB_REF#refs/tags/}
-          
-          # Get full commit hash for the tag
-          GIT_COMMIT=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-          
-          # Build time
-          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "git_commit=$GIT_COMMIT" >> $GITHUB_OUTPUT
-          echo "build_time=$BUILD_TIME" >> $GITHUB_OUTPUT
-          
-          echo "🚀 Release Information:"
-          echo "  Version: $VERSION"
-          echo "  Commit: $GIT_COMMIT"
-          echo "  Build Time: $BUILD_TIME"
-        
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-          merge-multiple: true
       
-      - name: Organize release files
-        run: |
-          mkdir -p release-files
-          find artifacts -type f \( -name "*.tar.gz" -o -name "*.zip" -o -name "*.sha256" \) -exec cp {} release-files/ \;
-          
-          echo "📦 Release files:"
-          ls -la release-files/
-      
-      - name: Generate comprehensive release notes
+      - name: Generate release notes
         id: release_notes
-        run: |  
-          VERSION=${{ steps.release_version.outputs.version }}
-          GIT_COMMIT=${{ steps.release_version.outputs.git_commit }}
-          BUILD_TIME=${{ steps.release_version.outputs.build_time }}
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          GIT_COMMIT=$(git rev-parse HEAD)
+          BUILD_TIME=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
           
-          echo "## 🚀 Release $VERSION" > release_notes.md
-          echo "" >> release_notes.md
-          echo "### 📊 Release Information" >> release_notes.md
-          echo "- **Version**: $VERSION" >> release_notes.md
-          echo "- **Git Commit**: $GIT_COMMIT" >> release_notes.md
-          echo "- **Build Time**: $BUILD_TIME" >> release_notes.md
-          echo "- **Built By**: GitHub Actions" >> release_notes.md
-          echo "" >> release_notes.md
-          echo "### 📦 Downloads" >> release_notes.md
-          echo "" >> release_notes.md
-          echo "| Platform | Architecture | File | SHA256 |" >> release_notes.md
-          echo "|----------|--------------|------|--------|" >> release_notes.md
+          cat > release_notes.md << EOF
+          ## Release $VERSION
           
-          for file in release-files/*.tar.gz release-files/*.zip; do
-            if [ -f "$file" ]; then
-              filename=$(basename "$file")
-              checksum_file="${file%.tar.gz}.sha256"
-              if [ ! -f "$checksum_file" ]; then
-                checksum_file="${file%.zip}.sha256"
-              fi
-              
-              if [[ "$filename" == *"linux"* ]]; then
-                platform="🐧 Linux"
-              elif [[ "$filename" == *"darwin"* ]]; then
-                platform="🍎 macOS"
-              elif [[ "$filename" == *"windows"* ]]; then
-                platform="🪟 Windows"
-              else
-                platform="📦 Other"
-              fi
-              
-              if [[ "$filename" == *"amd64"* ]]; then
-                arch="x86_64"
-              elif [[ "$filename" == *"arm64"* ]]; then
-                arch="ARM64"
-              elif [[ "$filename" == *"armv7"* ]]; then
-                arch="ARMv7"
-              else
-                arch="Other"
-              fi
-              
-              # Get checksum if available
-              if [ -f "$checksum_file" ]; then
-                checksum="✅ Available"
-              else
-                checksum="❌ Missing"
-              fi
-              
-              echo "| $platform | $arch | \`$filename\` | $checksum |" >> release_notes.md
-            fi
-          done
+          ### Build Information
+          - **Version**: $VERSION
+          - **Commit**: $GIT_COMMIT
+          - **Build Time**: $BUILD_TIME
           
-          echo "" >> release_notes.md
-          echo "### 🔐 Verification" >> release_notes.md
-          echo "Each binary includes a SHA256 checksum file for verification:" >> release_notes.md
-          echo "\`\`\`bash" >> release_notes.md
-          echo "# Download both the binary and .sha256 file" >> release_notes.md
-          echo "sha256sum -c ${{ env.BINARY_NAME }}-*.sha256" >> release_notes.md
-          echo "\`\`\`" >> release_notes.md
-          echo "" >> release_notes.md
-          echo "### 📋 Installation" >> release_notes.md
-          echo "1. Download the appropriate binary for your platform" >> release_notes.md
-          echo "2. Verify the checksum: \`sha256sum -c ${{ env.BINARY_NAME }}-*.sha256\`" >> release_notes.md
-          echo "3. Make it executable: \`chmod +x ${{ env.BINARY_NAME }}-*\` (Unix-like systems)" >> release_notes.md
-          echo "4. Move to your PATH or run directly" >> release_notes.md
-          echo "" >> release_notes.md
-          echo "### 🆕 What's New" >> release_notes.md
-          echo "Check the detailed version information:" >> release_notes.md
-          echo "\`\`\`bash" >> release_notes.md
-          echo "${{ env.BINARY_NAME }} version" >> release_notes.md
-          echo "\`\`\`" >> release_notes.md
+          ### Downloads
+          Choose the appropriate binary for your platform:
+          
+          **Linux:**
+          - Linux AMD64: \`${{ env.BINARY_NAME }}_linux_amd64\`
+          - Linux ARM64: \`${{ env.BINARY_NAME }}_linux_arm64\`
+          - Linux ARMv7: \`${{ env.BINARY_NAME }}_linux_armv7\`
+          
+          **macOS:**
+          - macOS Intel: \`${{ env.BINARY_NAME }}_darwin_amd64\`
+          - macOS Apple Silicon: \`${{ env.BINARY_NAME }}_darwin_arm64\`
+          
+          **Windows:**
+          - Windows AMD64: \`${{ env.BINARY_NAME }}_windows_amd64.exe\`
+          
+          ### Installation
+          1. Download the binary for your platform
+          2. Verify checksum (optional): \`sha256sum -c filename.sha256\`
+          3. Make executable (Unix): \`chmod +x filename\`
+          4. Run: \`./filename --help\`
+          EOF
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-files/*
+          files: artifacts/**/*
           body_path: release_notes.md
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') || contains(github.ref, 'rc') }}
-          generate_release_notes: true
           make_latest: true
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # Test version functionality after build (development only)
-  test-version:
-    name: Test Version Functionality
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name != 'release' && !startsWith(github.ref, 'refs/tags/')
-    steps:
-      - name: Download Linux artifact for testing
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ env.BINARY_NAME }}-linux-amd64
-          path: test-binary
-      
-      - name: Test version commands
-        run: |
-          cd test-binary
-          chmod +x ${{ env.BINARY_NAME }}-linux-amd64
-          
-          echo "🧪 Testing version commands..."
-          
-          # Test short version
-          echo "📋 Short version:"
-          ./${{ env.BINARY_NAME }}-linux-amd64 --version
-          
-          echo ""
-          echo "📋 Detailed version:"
-          ./${{ env.BINARY_NAME }}-linux-amd64 version
-          
-          echo ""
-          echo "✅ Version functionality test completed"
-
-  # # Optional: Update homebrew formula or other package managers
-  # update-package-managers:
-  #   name: Update Package Managers
-  #   runs-on: ubuntu-latest
-  #   needs: release
-  #   if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref, 'alpha') && !contains(github.ref, 'beta') && !contains(github.ref, 'rc')
-  #   steps:
-  #     - name: Checkout code
-  #       uses: actions/checkout@v4
-        
-  #     - name: Extract version
-  #       id: version
-  #       run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-        
-  #     - name: Update Homebrew formula
-  #       # This is a placeholder - you would implement actual formula update logic
-  #       run: |
-  #         echo "Would update Homebrew formula for version ${{ steps.version.outputs.version }}"
-  #         # Example: Create PR to homebrew-tap repository
-  #         # This requires a separate repository and proper setup 
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
