@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"doc-to-text/pkg/interfaces"
-	"doc-to-text/pkg/logger"
+	"github.com/nodewee/doc-to-text/pkg/interfaces"
+	"github.com/nodewee/doc-to-text/pkg/logger"
 )
 
 // SimpleTempManager manages temporary files that are cleaned up after processing

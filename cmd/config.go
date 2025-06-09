@@ -3,7 +3,7 @@ package cmd
 import (
 	"fmt"
 
-	"doc-to-text/pkg/config"
+	"github.com/nodewee/doc-to-text/pkg/config"
 
 	"github.com/spf13/cobra"
 )

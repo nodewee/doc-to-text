@@ -10,8 +10,8 @@ import (
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 
-	"doc-to-text/pkg/interfaces"
-	"doc-to-text/pkg/types"
+	"github.com/nodewee/doc-to-text/pkg/interfaces"
+	"github.com/nodewee/doc-to-text/pkg/types"
 )
 
 // HTMLExtractor handles HTML and MHTML files

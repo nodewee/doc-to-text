@@ -7,11 +7,11 @@ import (
 	"strconv"
 	"strings"
 
-	"doc-to-text/pkg/config"
-	"doc-to-text/pkg/interfaces"
-	"doc-to-text/pkg/logger"
-	"doc-to-text/pkg/ocr/engines"
-	"doc-to-text/pkg/types"
+	"github.com/nodewee/doc-to-text/pkg/config"
+	"github.com/nodewee/doc-to-text/pkg/interfaces"
+	"github.com/nodewee/doc-to-text/pkg/logger"
+	"github.com/nodewee/doc-to-text/pkg/ocr/engines"
+	"github.com/nodewee/doc-to-text/pkg/types"
 )
 
 // DefaultOCRSelector implements OCR tool selection

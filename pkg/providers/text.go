@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"doc-to-text/pkg/interfaces"
-	"doc-to-text/pkg/types"
-	"doc-to-text/pkg/utils"
+	"github.com/nodewee/doc-to-text/pkg/interfaces"
+	"github.com/nodewee/doc-to-text/pkg/types"
+	"github.com/nodewee/doc-to-text/pkg/utils"
 )
 
 // TextFileExtractor handles plain text files

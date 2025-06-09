@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"doc-to-text/pkg/constants"
+	"github.com/nodewee/doc-to-text/pkg/constants"
 )
 
 // PathUtils provides cross-platform path utilities

@@ -9,8 +9,8 @@ import (
 	"runtime"
 	"strings"
 
-	"doc-to-text/pkg/constants"
-	"doc-to-text/pkg/utils"
+	"github.com/nodewee/doc-to-text/pkg/constants"
+	"github.com/nodewee/doc-to-text/pkg/utils"
 )
 
 const (

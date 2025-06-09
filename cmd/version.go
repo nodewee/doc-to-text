@@ -68,7 +68,7 @@ func showVersionInfo() {
 	if version != "dev" && !strings.Contains(version, "dev") && !strings.Contains(version, "+") {
 		fmt.Printf("🚀 Release Information:\n")
 		fmt.Printf("  This is a release build\n")
-		fmt.Printf("  Release Notes: https://github.com/your-org/doc-to-text/releases/tag/%s\n", version)
+		fmt.Printf("  Release Notes: https://github.com/nodewee/doc-to-text/releases/tag/%s\n", version)
 	} else {
 		fmt.Printf("🔧 Development Information:\n")
 		fmt.Printf("  This is a development build\n")

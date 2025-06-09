@@ -1,8 +1,9 @@
 package main
 
 import (
-	"doc-to-text/cmd"
 	"os"
+
+	"github.com/nodewee/doc-to-text/cmd"
 )
 
 // Version information - these will be set during build time via ldflags

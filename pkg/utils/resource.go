@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"doc-to-text/pkg/logger"
+	"github.com/nodewee/doc-to-text/pkg/logger"
 )
 
 // ResourceManager manages temporary resources and provides cleanup capabilities

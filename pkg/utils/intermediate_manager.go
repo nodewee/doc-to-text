@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"sync"
 
-	"doc-to-text/pkg/interfaces"
-	"doc-to-text/pkg/logger"
+	"github.com/nodewee/doc-to-text/pkg/interfaces"
+	"github.com/nodewee/doc-to-text/pkg/logger"
 )
 
 // IntermediateManager manages intermediate files that persist between runs

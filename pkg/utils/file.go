@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"doc-to-text/pkg/types"
+	"github.com/nodewee/doc-to-text/pkg/types"
 )
 
 // File extension sets for different media types

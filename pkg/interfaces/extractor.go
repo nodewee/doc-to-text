@@ -3,7 +3,7 @@ package interfaces
 import (
 	"context"
 
-	"doc-to-text/pkg/types"
+	"github.com/nodewee/doc-to-text/pkg/types"
 )
 
 // Extractor defines the interface for text extraction

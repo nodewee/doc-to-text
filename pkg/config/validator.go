@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"doc-to-text/pkg/types"
-	"doc-to-text/pkg/utils"
+	"github.com/nodewee/doc-to-text/pkg/types"
+	"github.com/nodewee/doc-to-text/pkg/utils"
 )
 
 // ConfigValidator 配置验证器

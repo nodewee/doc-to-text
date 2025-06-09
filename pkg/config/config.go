@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strconv"
 
-	"doc-to-text/pkg/interfaces"
-	"doc-to-text/pkg/logger"
-	"doc-to-text/pkg/types"
-	"doc-to-text/pkg/utils"
+	"github.com/nodewee/doc-to-text/pkg/interfaces"
+	"github.com/nodewee/doc-to-text/pkg/logger"
+	"github.com/nodewee/doc-to-text/pkg/types"
+	"github.com/nodewee/doc-to-text/pkg/utils"
 )
 
 // Default values and constants

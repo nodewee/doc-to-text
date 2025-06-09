@@ -1,4 +1,4 @@
-module doc-to-text
+module github.com/nodewee/doc-to-text
 
 go 1.23.0
 
