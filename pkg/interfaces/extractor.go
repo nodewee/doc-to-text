@@ -26,14 +26,6 @@ type OCRExtractor interface {
 	ExtractWithOCR(ctx context.Context, inputFile string) (map[string]interface{}, error)
 }
 
-// CacheableExtractor defines interface for extractors that support caching
-type CacheableExtractor interface {
-	Extractor
-
-	// GetCacheKey returns a unique cache key for the file
-	GetCacheKey(fileInfo *types.FileInfo) string
-}
-
 // ExtractorFactory creates extractors based on file type
 type ExtractorFactory interface {
 	// CreateExtractor creates an appropriate extractor for the file

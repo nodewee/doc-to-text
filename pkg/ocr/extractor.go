@@ -325,6 +325,12 @@ func (e *OCRExtractor) splitPDFIntoSinglePages(ctx context.Context, pdfPath, out
 	e.logger.Debug("Input PDF: %s", pdfPath)
 	e.logger.Debug("Output directory: %s", outputDir)
 
+	// Find Ghostscript command at execution time
+	ghostscriptPath, err := e.findGhostscriptPath()
+	if err != nil {
+		return 0, err
+	}
+
 	// Ensure output directory exists before running gs command
 	e.logger.Debug("Creating output directory: %s", outputDir)
 	if err := utils.EnsureDir(outputDir); err != nil {
@@ -358,10 +364,10 @@ func (e *OCRExtractor) splitPDFIntoSinglePages(ctx context.Context, pdfPath, out
 
 	args = append(args, normalizedPDFPath)
 
-	cmd := exec.CommandContext(ctx, e.config.GhostscriptPath, args...)
+	cmd := exec.CommandContext(ctx, ghostscriptPath, args...)
 
 	e.logger.Info("Splitting PDF into individual pages...")
-	e.logger.Debug("Command: %s %s", e.config.GhostscriptPath, strings.Join(args, " "))
+	e.logger.Debug("Command: %s %s", ghostscriptPath, strings.Join(args, " "))
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -382,6 +388,34 @@ func (e *OCRExtractor) splitPDFIntoSinglePages(ctx context.Context, pdfPath, out
 
 	e.logger.Info("Successfully split PDF into %d page files", pageCount)
 	return pageCount, nil
+}
+
+// findGhostscriptPath attempts to find the Ghostscript command
+func (e *OCRExtractor) findGhostscriptPath() (string, error) {
+	// Try to find Ghostscript using shell detection
+	commandNames := []string{"gs", "ghostscript", "gswin64c", "gswin32c"}
+
+	for _, cmdName := range commandNames {
+		if foundPath, err := utils.DefaultPathUtils.FindExecutableInShell(cmdName); err == nil {
+			e.logger.Debug("Found Ghostscript at: %s", foundPath)
+			return foundPath, nil
+		}
+	}
+
+	// Common installation paths based on platform
+	platformConfig := constants.GetPlatformConfig()
+	for _, path := range platformConfig.GhostscriptPaths {
+		if utils.DefaultPathUtils.IsCommandAvailable(path) {
+			e.logger.Debug("Found Ghostscript at common path: %s", path)
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("Ghostscript command not found. Please install Ghostscript first:\n" +
+		"  - macOS: brew install ghostscript\n" +
+		"  - Ubuntu/Debian: sudo apt-get install ghostscript\n" +
+		"  - Windows: Download from https://www.ghostscript.com/download/gsdnld.html\n" +
+		"  or visit: https://www.ghostscript.com for installation instructions")
 }
 
 // countExistingPages counts the number of existing page files in the output directory
@@ -433,15 +467,6 @@ func (e *OCRExtractor) SupportsFile(fileInfo *types.FileInfo) bool {
 // Name returns the name of the extractor
 func (e *OCRExtractor) Name() string {
 	return e.name
-}
-
-// GetCacheKey returns a unique cache key for the file
-func (e *OCRExtractor) GetCacheKey(fileInfo *types.FileInfo) string {
-	engineName := "unknown"
-	if e.tool != nil {
-		engineName = e.tool.Name()
-	}
-	return fmt.Sprintf("ocr-%s-%s", engineName, fileInfo.MD5Hash)
 }
 
 // extractTextFromOCRData extracts text from OCR result data

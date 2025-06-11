@@ -1,9 +1,7 @@
 package config
 
 import (
-	"fmt"
 	"os"
-	"path/filepath"
 	"strconv"
 
 	"github.com/nodewee/doc-to-text/pkg/interfaces"
@@ -22,26 +20,11 @@ const (
 	DefaultEnableVerbose    = false
 	DefaultOCRStrategy      = types.OCRStrategyInteractive
 	DefaultContentType      = types.ContentTypeImage // Default to image content type
-
-	// Tool paths
-	DefaultLLMCallerPath    = "llm-caller"
-	DefaultSuryaOCRPath     = "surya_ocr"
-	DefaultPandocPath       = "pandoc"
-	DefaultGhostscriptPath  = "gs"
-	DefaultCalibrePathMacOS = "/Applications/calibre.app/Contents/MacOS/ebook-convert"
-	DefaultCalibrePathLinux = "ebook-convert"
 )
 
-// Config holds application configuration
+// Config holds application runtime configuration (no file persistence)
 type Config struct {
-	// External tool paths
-	LLMCallerPath   string `json:"llm_caller_path"`
-	SuryaOCRPath    string `json:"surya_ocr_path"`
-	CalibrePath     string `json:"calibre_path"`
-	PandocPath      string `json:"pandoc_path"`
-	GhostscriptPath string `json:"ghostscript_path"`
-
-	// Runtime settings (not persisted to file)
+	// Runtime settings only
 	OCRStrategy      types.OCRStrategy `json:"-"`
 	LLMTemplate      string            `json:"-"`
 	ContentType      types.ContentType `json:"-"` // Document content type (text or image)
@@ -53,55 +36,24 @@ type Config struct {
 	EnableVerbose    bool              `json:"-"`
 }
 
-// DefaultConfig returns the configuration by loading from file or creating default
-func DefaultConfig() *Config {
-	// Try to load config from file first
-	config, err := LoadConfig()
-	if err != nil {
-		// If loading fails, create a basic default config
-		fmt.Printf("Warning: Failed to load config file, using basic defaults: %v\n", err)
-
-		return &Config{
-			LLMCallerPath:    "",
-			SuryaOCRPath:     "",
-			CalibrePath:      "",
-			PandocPath:       "",
-			GhostscriptPath:  "",
-			OCRStrategy:      DefaultOCRStrategy,
-			LLMTemplate:      "",
-			ContentType:      DefaultContentType,
-			SkipExisting:     DefaultSkipExisting,
-			MaxConcurrency:   DefaultMaxConcurrency,
-			MinTextThreshold: DefaultMinTextThreshold,
-			TimeoutMinutes:   DefaultTimeoutMinutes,
-			LogLevel:         DefaultLogLevel,
-			EnableVerbose:    DefaultEnableVerbose,
-		}
+// NewConfig creates a new configuration with defaults
+func NewConfig() *Config {
+	return &Config{
+		OCRStrategy:      DefaultOCRStrategy,
+		LLMTemplate:      "",
+		ContentType:      DefaultContentType,
+		SkipExisting:     DefaultSkipExisting,
+		MaxConcurrency:   DefaultMaxConcurrency,
+		MinTextThreshold: DefaultMinTextThreshold,
+		TimeoutMinutes:   DefaultTimeoutMinutes,
+		LogLevel:         DefaultLogLevel,
+		EnableVerbose:    DefaultEnableVerbose,
 	}
-
-	return config
 }
 
-// LoadConfigWithEnvOverrides loads config from file and applies environment variable overrides
+// LoadConfigWithEnvOverrides creates config and applies environment variable overrides
 func LoadConfigWithEnvOverrides() *Config {
-	config := DefaultConfig()
-
-	// Apply environment variable overrides for tool paths
-	if value := os.Getenv("LLM_CALLER_PATH"); value != "" {
-		config.LLMCallerPath = value
-	}
-	if value := os.Getenv("SURYA_OCR_PATH"); value != "" {
-		config.SuryaOCRPath = value
-	}
-	if value := os.Getenv("CALIBRE_PATH"); value != "" {
-		config.CalibrePath = value
-	}
-	if value := os.Getenv("PANDOC_PATH"); value != "" {
-		config.PandocPath = value
-	}
-	if value := os.Getenv("GHOSTSCRIPT_PATH"); value != "" {
-		config.GhostscriptPath = value
-	}
+	config := NewConfig()
 
 	// Apply environment variable overrides for runtime settings
 	if value := os.Getenv("DOC_TEXT_OCR_STRATEGY"); value != "" {
@@ -143,8 +95,21 @@ func LoadConfigWithEnvOverrides() *Config {
 
 // Validate validates the configuration
 func (c *Config) Validate() error {
-	validator := NewConfigValidator()
-	return validator.Validate(c)
+	// Basic validation for runtime settings
+	if c.MaxConcurrency < 1 {
+		return utils.NewValidationError("max concurrency must be at least 1", nil)
+	}
+	if c.MaxConcurrency > 20 {
+		return utils.NewValidationError("max concurrency should not exceed 20", nil)
+	}
+	if c.MinTextThreshold < 0 {
+		return utils.NewValidationError("min text threshold must be non-negative", nil)
+	}
+	if c.TimeoutMinutes < 1 {
+		return utils.NewValidationError("timeout must be at least 1 minute", nil)
+	}
+
+	return nil
 }
 
 // CreateFileManagers creates both intermediate and temporary file managers
@@ -166,23 +131,18 @@ func (c *Config) CreateTempFileManager(inputFile, md5Hash string, log *logger.Lo
 
 // GetOutputDir returns the output directory based on input file directory and MD5 hash
 func (c *Config) GetOutputDir(inputFilePath, md5Hash string) string {
-	inputDir := filepath.Dir(inputFilePath)
-	return filepath.Join(inputDir, md5Hash)
+	inputDir := utils.NormalizePath(utils.JoinPath(inputFilePath, ".."))
+	return utils.JoinPath(inputDir, md5Hash)
 }
 
 // GetTextFilePath returns the text file path for a given input file and MD5 hash
 func (c *Config) GetTextFilePath(inputFilePath, md5Hash string) string {
-	return filepath.Join(c.GetOutputDir(inputFilePath, md5Hash), "text.txt")
+	return utils.JoinPath(c.GetOutputDir(inputFilePath, md5Hash), "text.txt")
 }
 
 // Clone creates a deep copy of the configuration
 func (c *Config) Clone() *Config {
 	return &Config{
-		LLMCallerPath:    c.LLMCallerPath,
-		SuryaOCRPath:     c.SuryaOCRPath,
-		CalibrePath:      c.CalibrePath,
-		PandocPath:       c.PandocPath,
-		GhostscriptPath:  c.GhostscriptPath,
 		OCRStrategy:      c.OCRStrategy,
 		LLMTemplate:      c.LLMTemplate,
 		ContentType:      c.ContentType,
@@ -193,10 +153,4 @@ func (c *Config) Clone() *Config {
 		LogLevel:         c.LogLevel,
 		EnableVerbose:    c.EnableVerbose,
 	}
-}
-
-// String returns a string representation of the configuration
-func (c *Config) String() string {
-	return fmt.Sprintf("Config{OCRStrategy: %s, LogLevel: %s, Verbose: %v}",
-		c.OCRStrategy, c.LogLevel, c.EnableVerbose)
 }

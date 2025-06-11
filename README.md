@@ -8,7 +8,7 @@ A CLI tool for extracting text from various document formats with configurable O
 - **Configurable OCR**: LLM Caller (AI-powered) or Surya OCR (fast & multilingual)
 - **Smart Content Strategy**: Choose between text-first or image-first processing for PDFs
 - **Interactive Tool Selection**: Auto-detects available tools and prompts for selection
-- **Persistent Configuration**: Auto-detection and JSON-based tool path management
+- **Automatic Tool Detection**: No configuration files needed - tools are detected when required
 - **Cross-platform**: macOS, Linux, Windows with automatic tool detection
 
 ## 📚 Documentation
@@ -56,18 +56,13 @@ doc-to-text --version    # Quick version
 doc-to-text version      # Detailed build info
 ```
 
-## ⚙️ Configuration
+## ⚙️ Tool Detection
 
-The tool auto-detects available tools on first run and saves paths to `~/.doc-to-text/config.json`.
+The tool automatically detects required tools when needed:
 
-### Configuration Commands
-
-```bash
-# Manage tool paths
-doc-to-text config list
-doc-to-text config get surya_ocr_path
-doc-to-text config set surya_ocr_path /custom/path/surya_ocr
-```
+- **OCR Tools**: `llm-caller`, `surya_ocr`
+- **Document Processing**: `ebook-convert` (Calibre), `pandoc`, `gs` (Ghostscript)
+- **Detection Strategy**: Command lookup → Common paths → Clear error messages
 
 ### Environment Variable Overrides
 
@@ -76,10 +71,9 @@ doc-to-text config set surya_ocr_path /custom/path/surya_ocr
 DOC_TEXT_OCR_STRATEGY=surya_ocr doc-to-text document.pdf
 DOC_TEXT_CONTENT_TYPE=text doc-to-text document.pdf
 DOC_TEXT_MAX_CONCURRENCY=8 doc-to-text document.pdf
-SURYA_OCR_PATH=/custom/path doc-to-text document.pdf
 ```
 
-### Key Configuration Options
+### Key Runtime Options
 
 | Setting | Description | Default |
 |---------|-------------|---------|
@@ -102,11 +96,11 @@ SURYA_OCR_PATH=/custom/path doc-to-text document.pdf
 ## 🔧 OCR Engines
 
 ### Surya OCR (Recommended)
-- **Fast** and **multilingual** (100+ languages)
+- **Local** and **multilingual** (100+ languages)
 - **Installation**: `pip install surya-ocr`
 - **Best for**: Standard documents, batch processing
 
-### LLM Caller (Configurable AI)
+### [LLM Caller](https://github.com/nodewee/llm-caller) (Configurable AI)
 - **AI-powered** with template-based approach
 - **Requires**: `--llm_template` parameter
 - **Best for**: Complex layouts, handwritten text, specific models
@@ -141,7 +135,7 @@ Large document processing can be interrupted and resumed. The tool automatically
 
 ## 🚨 Common Issues
 
-**OCR tool not found**: Check tool installation and use `doc-to-text config set <tool>_path /path/to/tool`
+**OCR tool not found**: Tools are automatically detected. Ensure they are installed and available in your PATH
 
 **Permission errors**: Ensure tools are executable and paths are accessible
 

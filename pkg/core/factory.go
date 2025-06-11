@@ -58,6 +58,9 @@ func (f *DefaultExtractorFactory) CreateExtractorWithFallbacks(fileInfo *types.F
 
 	f.logger.Debug("Creating extractor chain with fallbacks for file type: %s", ext)
 
+	// Check if user explicitly chose a specific OCR strategy
+	userChosenOCR := f.config.OCRStrategy != types.OCRStrategyInteractive
+
 	// Define extraction strategy based on file type
 	switch {
 	case ext == "txt" || ext == "md" || ext == "json" || ext == "xml":
@@ -107,23 +110,28 @@ func (f *DefaultExtractorFactory) CreateExtractorWithFallbacks(fileInfo *types.F
 			}
 		}
 
-	case ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "gif" || ext == "bmp":
-		// Images - only OCR
+	case ext == "jpg" || ext == "jpeg" || ext == "png" || ext == "gif" || ext == "bmp" || ext == "webp" || ext == "tiff" || ext == "tif":
+		// Images - only OCR, no fallback if user explicitly chose OCR strategy
 		if ocrExtractor, exists := f.extractors["ocr"]; exists {
 			extractors = append(extractors, ocrExtractor)
 			f.logger.Debug("Added OCR extractor for file type: %s", ext)
 		}
 
 	default:
-		// Unknown types - try OCR first, then calibre fallback
+		// Unknown types - try OCR first, then calibre fallback (only if not explicitly chosen OCR)
 		f.logger.Debug("Unknown file type %s, trying fallback extractors", ext)
 		if ocrExtractor, exists := f.extractors["ocr"]; exists {
 			extractors = append(extractors, ocrExtractor)
 			f.logger.Debug("Added OCR extractor as fallback for unknown type: %s", ext)
 		}
-		if calibreExtractor, exists := f.extractors["calibre"]; exists {
-			extractors = append(extractors, calibreExtractor)
-			f.logger.Debug("Added Calibre fallback extractor for unknown type: %s", ext)
+		// Only add calibre fallback if user didn't explicitly choose an OCR strategy
+		if !userChosenOCR {
+			if calibreExtractor, exists := f.extractors["calibre"]; exists {
+				extractors = append(extractors, calibreExtractor)
+				f.logger.Debug("Added Calibre fallback extractor for unknown type: %s", ext)
+			}
+		} else {
+			f.logger.Debug("Skipping Calibre fallback since user explicitly chose OCR strategy: %s", f.config.OCRStrategy)
 		}
 	}
 

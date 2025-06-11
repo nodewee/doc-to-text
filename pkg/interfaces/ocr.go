@@ -20,9 +20,6 @@ type OCREngine interface {
 	// SupportsDirectPDF returns true if the tool can process PDF files directly
 	SupportsDirectPDF() bool
 
-	// IsAvailable checks if the OCR tool is available on the system
-	IsAvailable() bool
-
 	// GetDescription returns a description of the OCR tool
 	GetDescription() string
 }

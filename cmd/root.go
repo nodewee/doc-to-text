@@ -29,66 +29,66 @@ var (
 	showVersion bool
 )
 
-// AppHandler 封装应用程序主要处理逻辑
+// AppHandler encapsulates application main processing logic
 type AppHandler struct {
 	config    *config.Config
 	logger    *logger.Logger
 	processor interfaces.FileProcessor
 }
 
-// NewAppHandler 创建应用程序处理器
+// NewAppHandler creates an application handler
 func NewAppHandler() *AppHandler {
 	return &AppHandler{}
 }
 
-// ProcessFile 处理文件的主要入口
+// ProcessFile is the main entry point for file processing
 func (h *AppHandler) ProcessFile(inputFile string) error {
-	// 初始化配置和组件
+	// Initialize configuration and components
 	if err := h.initialize(inputFile); err != nil {
 		return err
 	}
 
-	// 处理文件
+	// Process the file
 	result, err := h.processFile(inputFile)
 	if err != nil {
 		return err
 	}
 
-	// 显示结果
+	// Display results
 	h.displayResults(result)
 	return nil
 }
 
-// initialize 初始化应用程序组件
+// initialize initializes application components
 func (h *AppHandler) initialize(inputFile string) error {
-	// 验证输入文件路径
+	// Validate input file path
 	_, err := filepath.Abs(inputFile)
 	if err != nil {
 		return utils.WrapError(err, utils.ErrorTypeValidation, "error resolving file path")
 	}
 
-	// 加载配置
+	// Load configuration with environment overrides (no file persistence)
 	h.config = config.LoadConfigWithEnvOverrides()
 	h.applyCommandLineOverrides()
 
-	// 验证配置
+	// Validate configuration
 	if err := h.config.Validate(); err != nil {
 		return utils.WrapError(err, utils.ErrorTypeValidation, "configuration validation failed")
 	}
 
-	// 创建日志器和处理器
+	// Create logger and processor
 	h.logger = logger.NewLogger(h.config.LogLevel, h.config.EnableVerbose)
 	h.processor = core.NewFileProcessor(h.config, h.logger)
 
 	return nil
 }
 
-// applyCommandLineOverrides 应用命令行参数覆盖
+// applyCommandLineOverrides applies command line parameter overrides
 func (h *AppHandler) applyCommandLineOverrides() {
 	if ocrStrategy != "" {
 		h.config.OCRStrategy = types.OCRStrategy(ocrStrategy)
 
-		// 验证LLM模板参数
+		// Validate LLM template parameter
 		if h.config.OCRStrategy == types.OCRStrategyLLMCaller && llmTemplate == "" {
 			log.Fatalf("Error: --llm_template is required when using --ocr llm-caller")
 		}
@@ -98,14 +98,14 @@ func (h *AppHandler) applyCommandLineOverrides() {
 	if contentType != "" {
 		h.config.ContentType = types.ContentType(contentType)
 	} else if ocrStrategy == "" {
-		// 当没有指定 ocr 参数，也没有指定 content-type 参数时，智能检测文件类型
-		// 对于纯文本和HTML文档，直接使用默认设置，不询问用户
+		// When neither ocr nor content-type is specified, smart detection
+		// For pure text and HTML documents, use default settings without prompting
 		if h.shouldSkipContentTypePrompt() {
-			// 对于纯文本和HTML文档，使用默认的 image 类型（实际上不会用到OCR）
+			// For pure text and HTML documents, use default image type (OCR won't actually be used)
 			h.config.ContentType = types.ContentTypeImage
-			// 注意：此时logger还未初始化，所以不能调用logger方法
+			// Note: logger is not initialized yet, so can't call logger methods
 		} else {
-			// 对于其他文档类型（如PDF），交互询问用户
+			// For other document types (like PDF), ask user interactively
 			selectedContentType, err := h.promptForContentType()
 			if err != nil {
 				log.Fatalf("Error selecting content type: %v", err)
@@ -114,64 +114,64 @@ func (h *AppHandler) applyCommandLineOverrides() {
 		}
 	}
 
-	// 应用 verbose 参数覆盖
+	// Apply verbose parameter override
 	if verbose {
 		h.config.EnableVerbose = true
 	}
 }
 
-// shouldSkipContentTypePrompt 检查是否应该跳过 content type 询问
-// 对于纯文本文档和HTML文档，不需要询问 content type
+// shouldSkipContentTypePrompt checks whether to skip content type prompting
+// For pure text documents and HTML documents, no need to ask for content type
 func (h *AppHandler) shouldSkipContentTypePrompt() bool {
-	// 这个方法在初始化之前调用，所以需要临时获取文件信息
+	// This method is called before initialization, so we need to temporarily get file info
 	if len(os.Args) < 2 {
 		return false
 	}
 
-	inputFile := os.Args[len(os.Args)-1] // 获取最后一个参数作为输入文件
+	inputFile := os.Args[len(os.Args)-1] // Get the last parameter as input file
 	if inputFile == "" || strings.HasPrefix(inputFile, "-") {
-		return false // 如果是选项参数，不是文件路径
+		return false // If it's an option parameter, not a file path
 	}
 
-	// 获取文件扩展名
+	// Get file extension
 	ext := strings.ToLower(filepath.Ext(inputFile))
 	if ext != "" && ext[0] == '.' {
-		ext = ext[1:] // 移除点号
+		ext = ext[1:] // Remove the dot
 	}
 
-	// 检查是否为纯文本文档或HTML文档
+	// Check if it's a pure text document or HTML document
 	switch ext {
 	case "txt", "md", "markdown", "json", "xml", "csv", "py", "js", "ts", "c", "cpp", "h", "java", "sh":
-		// 纯文本文档
+		// Pure text documents
 		return true
 	case "html", "htm", "mhtml", "mht":
-		// HTML文档
+		// HTML documents
 		return true
 	case "epub", "mobi":
-		// 电子书文档
+		// E-book documents
 		return true
 	default:
-		// 其他文档类型（如PDF、图片等）需要询问
+		// Other document types (like PDF, images) need prompting
 		return false
 	}
 }
 
-// processFile 执行文件处理逻辑
+// processFile executes file processing logic
 func (h *AppHandler) processFile(inputFile string) (*interfaces.ExtractionResult, error) {
 	absPath, _ := filepath.Abs(inputFile)
 
-	// 确定输出路径
+	// Determine output path
 	outputFilePath, err := h.determineOutputPath(absPath)
 	if err != nil {
 		return nil, utils.WrapError(err, utils.ErrorTypeIO, "error determining output path")
 	}
 
-	// 创建超时上下文
+	// Create timeout context
 	ctx, cancel := context.WithTimeout(context.Background(),
 		time.Duration(h.config.TimeoutMinutes)*time.Minute)
 	defer cancel()
 
-	// 执行文件处理（带重试）
+	// Execute file processing (with retry)
 	var result *interfaces.ExtractionResult
 	err = utils.WithRetry(func() error {
 		var processErr error
@@ -189,13 +189,13 @@ func (h *AppHandler) processFile(inputFile string) (*interfaces.ExtractionResult
 	return result, err
 }
 
-// determineOutputPath 确定输出文件路径
+// determineOutputPath determines the output file path
 func (h *AppHandler) determineOutputPath(inputPath string) (string, error) {
 	if outputPath != "" {
 		return filepath.Abs(outputPath)
 	}
 
-	// 使用MD5哈希路径
+	// Use MD5 hash path
 	md5Hash, err := utils.CalculateFileMD5(inputPath)
 	if err != nil {
 		return "", utils.WrapError(err, utils.ErrorTypeIO, "error calculating MD5 hash")
@@ -204,7 +204,7 @@ func (h *AppHandler) determineOutputPath(inputPath string) (string, error) {
 	return h.config.GetTextFilePath(inputPath, md5Hash), nil
 }
 
-// displayResults 显示处理结果
+// displayResults displays processing results
 func (h *AppHandler) displayResults(result *interfaces.ExtractionResult) {
 	fmt.Printf("✅ Text extracted successfully\n")
 	fmt.Printf("📊 Extractor used: %s\n", result.ExtractorUsed)
@@ -221,7 +221,7 @@ func (h *AppHandler) displayResults(result *interfaces.ExtractionResult) {
 	}
 }
 
-// showTextPreview 显示文本预览
+// showTextPreview displays text preview
 func (h *AppHandler) showTextPreview(text string) {
 	if len(text) > 200 {
 		preview := text[:200]
@@ -232,7 +232,7 @@ func (h *AppHandler) showTextPreview(text string) {
 	}
 }
 
-// promptForContentType 交互式询问用户选择content-type
+// promptForContentType interactively asks user to select content-type
 func (h *AppHandler) promptForContentType() (types.ContentType, error) {
 	fmt.Println("\n📄 Content Type Selection")
 	fmt.Println("==========================")
@@ -245,7 +245,7 @@ func (h *AppHandler) promptForContentType() (types.ContentType, error) {
 	fmt.Scanln(&input)
 	input = strings.TrimSpace(input)
 
-	// 默认选择 image (选项1)
+	// Default to image (option 1)
 	if input == "" || input == "1" {
 		fmt.Println("✅ Selected: image")
 		return types.ContentTypeImage, nil
@@ -266,14 +266,20 @@ var rootCmd = &cobra.Command{
 
 Features:
 - Advanced OCR with configurable tools (LLM Caller, Surya OCR)
-- E-book conversion using Calibre
+- E-book conversion using Calibre (auto-detected)
 - HTML/MHTML text extraction with built-in parser
 - Text file direct reading
+- Cross-platform tool detection
 
 OCR Tools:
 - llm-caller: Use LLM Caller with specified template (requires --llm_template)
 - surya_ocr: Use Surya OCR (local OCR tool)
 - (not specified): Prompt user to select OCR tool interactively
+
+Tool Detection:
+- Tools are automatically detected when needed
+- No configuration file required
+- Clear error messages if tools are missing
 
 Content Type Selection:
 - When neither --ocr nor --content-type is specified, the tool will interactively prompt you to select the content type

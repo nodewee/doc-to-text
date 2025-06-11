@@ -67,11 +67,6 @@ func (e *HTMLExtractor) Name() string {
 	return e.name
 }
 
-// GetCacheKey returns a unique cache key for the file
-func (e *HTMLExtractor) GetCacheKey(fileInfo *types.FileInfo) string {
-	return fmt.Sprintf("html-%s", fileInfo.MD5Hash)
-}
-
 // extractTextFromHTML extracts readable text from HTML content
 func (e *HTMLExtractor) extractTextFromHTML(htmlContent string) (string, error) {
 	doc, err := html.Parse(strings.NewReader(htmlContent))

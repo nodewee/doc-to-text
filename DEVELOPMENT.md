@@ -18,10 +18,9 @@ The project follows clean architecture with modular design and clear separation 
 doc-to-text/
 ├── cmd/                    # CLI commands
 │   ├── root.go            # Root command with content-type logic
-│   ├── config.go          # Configuration management commands
 │   └── version.go         # Version display with build-time injection
 ├── pkg/
-│   ├── config/            # Configuration with auto-detection
+│   ├── config/            # Runtime configuration
 │   ├── constants/         # Platform-specific constants
 │   ├── logger/            # Structured logging
 │   ├── interfaces/        # Clean interfaces design
@@ -85,19 +84,9 @@ func (s *DefaultOCRSelector) SelectOCRStrategy(strategy types.OCRStrategy) (inte
 
 ### Configuration System (`pkg/config/`)
 
-**Auto-detection with platform awareness:**
+**On-demand tool detection:**
 
-```go
-func detectAndUpdateToolPaths(configFile *ConfigFile) {
-    platformConfig := constants.GetPlatformConfig()
-    
-    toolsToDetect := map[string][]string{
-        "surya_ocr":   {utils.DefaultPathUtils.GetExecutableName("surya_ocr")},
-        "ghostscript": append(getGhostscriptPossibleNames(), platformConfig.GhostscriptPaths...),
-        "calibre":     append([]string{utils.DefaultPathUtils.GetExecutableName("ebook-convert")}, platformConfig.CalibrePaths...),
-    }
-}
-```
+The system now uses on-demand tool detection instead of upfront configuration. Tools are detected when actually needed during execution.
 
 ### OCR System Architecture (`pkg/ocr/`)
 
@@ -142,11 +131,18 @@ func (h *AppHandler) shouldSkipContentTypePrompt() bool {
 
 ```go
 type NewOCREngine struct {
-    config *config.Config
-    logger *logger.Logger
+    config              *config.Config
+    logger              *logger.Logger
+    intermediateManager interfaces.IntermediateFileManager
 }
 
 func (e *NewOCREngine) ExtractTextFromPDF(ctx context.Context, pdfPath string) (string, error) {
+    // Find tool at execution time
+    toolPath, err := e.findNewToolPath()
+    if err != nil {
+        return "", err
+    }
+    
     // Implementation with intermediate file support
     if e.intermediateManager != nil {
         resultFile := e.intermediateManager.GetOCRDataPath()
@@ -155,6 +151,15 @@ func (e *NewOCREngine) ExtractTextFromPDF(ctx context.Context, pdfPath string) (
         }
     }
     // ... OCR logic
+}
+
+func (e *NewOCREngine) findNewToolPath() (string, error) {
+    // On-demand tool detection
+    if foundPath, err := utils.DefaultPathUtils.FindExecutableInShell("new-tool"); err == nil {
+        return foundPath, nil
+    }
+    // ... check common paths
+    return "", fmt.Errorf("new-tool not found. Please install...")
 }
 ```
 
@@ -218,13 +223,16 @@ func TestOCRExtractor_ResumeCapability(t *testing.T) {
 
 ```go
 func (e *OCRExtractor) processPageWithRetry(ctx context.Context, pagePDFPath string, displayPageNum int) (string, error) {
-    return e.errorHandler.WithRetrySimple(func() error {
+    var pageText string
+    err := utils.WithRetry(func() error {
         text, err := e.processPagePDFWithOCR(ctx, pagePDFPath, displayPageNum)
         if err != nil {
             return utils.WrapError(err, utils.ErrorTypeOCR, "page processing failed")
         }
+        pageText = text
         return nil
-    })
+    }, constants.DefaultMaxRetries, e.errorHandler)
+    return pageText, err
 }
 ```
 
@@ -265,8 +273,8 @@ For build commands and version management, see **[VERSIONING.md](VERSIONING.md)*
 # Enable debug logging
 DOC_TEXT_LOG_LEVEL=debug ./doc-to-text document.pdf
 
-# Test OCR engine detection
-./doc-to-text config list
+# Test with debug logging  
+DOC_TEXT_LOG_LEVEL=debug ./doc-to-text document.pdf
 
 # Test specific components
 go test ./pkg/ocr -v
@@ -277,7 +285,7 @@ go test ./pkg/config -v
 
 ### Configuration Management
 
-- **Tool paths**: Stored in JSON config file with auto-detection
+- **Tool paths**: On-demand detection at execution time  
 - **Runtime settings**: Environment variables only
 - **Platform awareness**: Uses `constants.GetPlatformConfig()`
 
@@ -317,7 +325,7 @@ go test ./pkg/config -v
 - **Ghostscript**: PDF processing, page splitting, format conversion
 - **Pandoc**: Office document conversion (DOC, PPT, XLS to text)
 - **Calibre**: E-book text extraction (EPUB, MOBI to text)
-- **OCR Tools**: Surya OCR (fast), LLM Caller (AI-powered, configurable)
+- **OCR Tools**: Surya OCR (local), LLM Caller (via API)
 
 ### Platform Considerations
 

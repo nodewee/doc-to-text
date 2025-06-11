@@ -55,25 +55,20 @@ doc-to-text report.docx
 
 ## ⚙️ Configuration
 
-### Auto-Detection
+### Automatic Tool Detection
 
-On first run, the tool automatically:
-- Detects available OCR engines
-- Saves tool paths to `~/.doc-to-text/config.json`
-- Creates organized output directories
+The tool automatically detects available tools when needed:
+- No configuration files needed
+- Tools are detected at execution time
+- Clear error messages if tools are missing
 
-### Basic Configuration
+### Runtime Configuration
 
 ```bash
-# View current settings
-doc-to-text config list
-
-# Set tool paths
-doc-to-text config set surya_ocr_path /custom/path/surya_ocr
-
-# Environment overrides
+# Environment overrides for runtime settings
 DOC_TEXT_OCR_STRATEGY=surya_ocr doc-to-text document.pdf
 DOC_TEXT_CONTENT_TYPE=text doc-to-text document.pdf
+DOC_TEXT_MAX_CONCURRENCY=8 doc-to-text document.pdf
 ```
 
 ## 🔧 OCR Tools
@@ -121,7 +116,7 @@ input_directory/
 
 ## 🚨 Troubleshooting
 
-**Tool not found**: Use `doc-to-text config set <tool>_path /path/to/tool`
+**Tool not found**: Ensure tools are installed and available in your PATH
 
 **Permission errors**: Ensure tools are executable (`chmod +x /path/to/tool`)
 

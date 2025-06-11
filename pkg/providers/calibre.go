@@ -8,13 +8,14 @@ import (
 	"strings"
 
 	"github.com/nodewee/doc-to-text/pkg/config"
+	"github.com/nodewee/doc-to-text/pkg/constants"
 	"github.com/nodewee/doc-to-text/pkg/interfaces"
 	"github.com/nodewee/doc-to-text/pkg/logger"
 	"github.com/nodewee/doc-to-text/pkg/types"
 	"github.com/nodewee/doc-to-text/pkg/utils"
 )
 
-// CalibreFallbackExtractor handles various document types using Calibre as fallback
+// CalibreFallbackExtractor extracts text using Calibre as a fallback
 type CalibreFallbackExtractor struct {
 	name        string
 	config      *config.Config
@@ -22,7 +23,7 @@ type CalibreFallbackExtractor struct {
 	tempManager interfaces.TempFileManager
 }
 
-// NewCalibreFallbackExtractor creates a new calibre fallback extractor
+// NewCalibreFallbackExtractor creates a new Calibre fallback extractor
 func NewCalibreFallbackExtractor(cfg *config.Config, log *logger.Logger) interfaces.Extractor {
 	return &CalibreFallbackExtractor{
 		name:   "calibre",
@@ -31,79 +32,111 @@ func NewCalibreFallbackExtractor(cfg *config.Config, log *logger.Logger) interfa
 	}
 }
 
-// Extract extracts text from various document types using Calibre
-func (e *CalibreFallbackExtractor) Extract(ctx context.Context, inputFile string) (string, error) {
-	e.logger.Progress("📖", "Attempting Calibre fallback extraction for: %s", inputFile)
+// findCalibrePath attempts to find the Calibre ebook-convert command
+func (e *CalibreFallbackExtractor) findCalibrePath() (string, error) {
+	// Try to find ebook-convert using shell detection
+	if foundPath, err := utils.DefaultPathUtils.FindExecutableInShell("ebook-convert"); err == nil {
+		e.logger.Debug("Found ebook-convert at: %s", foundPath)
+		return foundPath, nil
+	}
 
-	// Get file info for MD5 hash to initialize temp manager
-	fileInfo, err := utils.GetFileInfo(inputFile)
+	// Common installation paths based on platform
+	platformConfig := constants.GetPlatformConfig()
+	for _, path := range platformConfig.CalibrePaths {
+		if utils.DefaultPathUtils.IsCommandAvailable(path) {
+			e.logger.Debug("Found ebook-convert at common path: %s", path)
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("Calibre ebook-convert command not found. Please install Calibre first:\n" +
+		"  - macOS: brew install calibre\n" +
+		"  - Ubuntu/Debian: sudo apt-get install calibre\n" +
+		"  - Windows: Download from https://calibre-ebook.com/download\n" +
+		"  or visit: https://calibre-ebook.com for installation instructions")
+}
+
+// Extract extracts text from file using Calibre
+func (e *CalibreFallbackExtractor) Extract(ctx context.Context, inputFile string) (string, error) {
+	e.logger.Info("Attempting text extraction using Calibre: %s", inputFile)
+
+	// Find Calibre command at execution time
+	calibrePath, err := e.findCalibrePath()
 	if err != nil {
-		return "", fmt.Errorf("failed to get file info for temp manager: %w", err)
+		return "", err
 	}
 
 	// Initialize temp manager if not already done
 	if e.tempManager == nil {
-		e.tempManager = e.config.CreateTempFileManager(inputFile, fileInfo.MD5Hash, e.logger)
+		md5Hash, err := utils.CalculateFileMD5(inputFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to calculate file hash: %w", err)
+		}
+		e.tempManager = e.config.CreateTempFileManager(inputFile, md5Hash, e.logger)
 	}
 
-	// Create temporary output file
-	outputFile, err := e.tempManager.CreateTempFile("calibre_fallback", ".txt")
+	var result string
+	err = e.tempManager.WithCleanup(func() error {
+		// Create temporary output file
+		outputFile, err := e.tempManager.CreateTempFile("calibre_output_", ".txt")
+		if err != nil {
+			return fmt.Errorf("failed to create temp output file: %w", err)
+		}
+
+		// Run Calibre ebook-convert
+		cmd := exec.CommandContext(ctx, calibrePath, inputFile, outputFile)
+		e.logger.Debug("Running Calibre command: %s", cmd.String())
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			e.logger.Error("Calibre conversion failed: %s", string(output))
+			return fmt.Errorf("calibre conversion failed: %w", err)
+		}
+
+		// Read the output
+		content, err := os.ReadFile(outputFile)
+		if err != nil {
+			return fmt.Errorf("failed to read Calibre output: %w", err)
+		}
+
+		text := strings.TrimSpace(string(content))
+		if len(text) < e.config.MinTextThreshold {
+			return fmt.Errorf("extracted text is too short (%d chars, minimum %d)", len(text), e.config.MinTextThreshold)
+		}
+
+		result = text
+		e.logger.Debug("Calibre extraction successful: %d characters", len(text))
+		return nil
+	})
+
 	if err != nil {
-		return "", fmt.Errorf("failed to create temporary output file: %w", err)
-	}
-	defer os.Remove(outputFile) // Clean up temporary file
-
-	// Run calibre's ebook-convert with timeout
-	cmd := exec.CommandContext(ctx, e.config.CalibrePath, inputFile, outputFile)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		e.logger.Error("Calibre fallback failed: %s", string(output))
-		return "", fmt.Errorf("calibre fallback extraction failed: %w", err)
+		return "", err
 	}
 
-	// Read the converted text
-	content, err := os.ReadFile(outputFile)
-	if err != nil {
-		return "", fmt.Errorf("error reading calibre-converted file: %w", err)
-	}
-
-	// Check if the output is meaningful (not just empty or error messages)
-	text := string(content)
-	if len(strings.TrimSpace(text)) < 10 {
-		return "", fmt.Errorf("calibre fallback produced insufficient text content")
-	}
-
-	e.logger.Progress("✅", "Calibre fallback extraction completed successfully")
-	return text, nil
+	return result, nil
 }
 
-// SupportsFile checks if this extractor can handle the file as fallback
+// SupportsFile checks if this extractor supports the given file type
 func (e *CalibreFallbackExtractor) SupportsFile(fileInfo *types.FileInfo) bool {
 	ext := strings.ToLower(fileInfo.Extension)
 
-	// Support common document formats that Calibre can handle
-	supportedExtensions := map[string]bool{
-		"pdf":  true,
-		"doc":  true,
-		"docx": true,
-		"rtf":  true,
-		"odt":  true,
-		"html": true,
-		"htm":  true,
-		"epub": true,
-		"mobi": true,
-		"txt":  true,
+	// Support e-books, PDFs, and HTML files for Calibre fallback
+	supportedExts := []string{
+		"epub", "mobi", "azw", "azw3", "fb2", "lit", "lrf", "pdb", "pdf",
+		"html", "htm", "mhtml", "mht",
+		"doc", "docx", "rtf", "odt", "txt",
 	}
 
-	return supportedExtensions[ext]
+	for _, supportedExt := range supportedExts {
+		if ext == supportedExt {
+			return true
+		}
+	}
+
+	return false
 }
 
 // Name returns the name of the extractor
 func (e *CalibreFallbackExtractor) Name() string {
 	return e.name
-}
-
-// GetCacheKey returns a unique cache key for the file
-func (e *CalibreFallbackExtractor) GetCacheKey(fileInfo *types.FileInfo) string {
-	return fmt.Sprintf("calibre-%s", fileInfo.MD5Hash)
 }

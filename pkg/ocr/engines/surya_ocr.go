@@ -54,7 +54,7 @@ func (e *SuryaOCREngine) Name() string {
 
 // GetDescription returns a description of the OCR tool
 func (e *SuryaOCREngine) GetDescription() string {
-	return "Surya OCR (local OCR tool)"
+	return "Surya OCR (local OCR tool with multilingual support)"
 }
 
 // SupportsDirectPDF returns true since we now want to process single-page PDFs directly
@@ -62,10 +62,34 @@ func (e *SuryaOCREngine) SupportsDirectPDF() bool {
 	return true
 }
 
-// IsAvailable checks if the OCR tool is available on the system
-func (e *SuryaOCREngine) IsAvailable() bool {
-	_, err := exec.LookPath(e.config.SuryaOCRPath)
-	return err == nil
+// findSuryaOCRPath attempts to find the surya_ocr command
+func (e *SuryaOCREngine) findSuryaOCRPath() (string, error) {
+	// Try to find surya_ocr using shell detection
+	if foundPath, err := utils.DefaultPathUtils.FindExecutableInShell("surya_ocr"); err == nil {
+		e.logger.Debug("Found surya_ocr at: %s", foundPath)
+		return foundPath, nil
+	}
+
+	// Common installation paths
+	commonPaths := []string{
+		"surya_ocr",
+		"/usr/local/bin/surya_ocr",
+		"/usr/bin/surya_ocr",
+		"/opt/homebrew/bin/surya_ocr",
+		"/home/linuxbrew/.linuxbrew/bin/surya_ocr",
+		"~/.local/bin/surya_ocr",
+	}
+
+	for _, path := range commonPaths {
+		if utils.DefaultPathUtils.IsCommandAvailable(path) {
+			e.logger.Debug("Found surya_ocr at common path: %s", path)
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("surya_ocr command not found. Please install Surya OCR first:\n" +
+		"  pip install surya-ocr\n" +
+		"  or visit: https://github.com/VikParuchuri/surya for installation instructions")
 }
 
 // SetIntermediateManager sets the intermediate file manager for persistent storage
@@ -76,6 +100,12 @@ func (e *SuryaOCREngine) SetIntermediateManager(intermediateManager interfaces.I
 // ExtractTextFromPDF extracts text from PDF using Surya OCR
 func (e *SuryaOCREngine) ExtractTextFromPDF(ctx context.Context, pdfPath string) (string, error) {
 	e.logger.Debug("Starting Surya OCR extraction from PDF: %s", pdfPath)
+
+	// Find surya_ocr command at execution time
+	suryaOCRPath, err := e.findSuryaOCRPath()
+	if err != nil {
+		return "", err
+	}
 
 	// Ensure intermediate manager is available
 	if e.intermediateManager == nil {
@@ -104,7 +134,7 @@ func (e *SuryaOCREngine) ExtractTextFromPDF(ctx context.Context, pdfPath string)
 	normalizedPDFPath := utils.NormalizePath(pdfPath)
 	normalizedOutputDir := utils.NormalizePath(outputDir)
 
-	cmd := exec.CommandContext(ctx, e.config.SuryaOCRPath,
+	cmd := exec.CommandContext(ctx, suryaOCRPath,
 		"--output_dir", normalizedOutputDir,
 		normalizedPDFPath)
 
@@ -137,6 +167,12 @@ func (e *SuryaOCREngine) ExtractTextFromPDF(ctx context.Context, pdfPath string)
 func (e *SuryaOCREngine) ExtractTextFromImage(ctx context.Context, imagePath string) (string, error) {
 	e.logger.Debug("Starting Surya OCR extraction from image: %s", imagePath)
 
+	// Find surya_ocr command at execution time
+	suryaOCRPath, err := e.findSuryaOCRPath()
+	if err != nil {
+		return "", err
+	}
+
 	// Ensure intermediate manager is available
 	if e.intermediateManager == nil {
 		return "", fmt.Errorf("intermediate manager not initialized")
@@ -164,7 +200,7 @@ func (e *SuryaOCREngine) ExtractTextFromImage(ctx context.Context, imagePath str
 	normalizedImagePath := utils.NormalizePath(imagePath)
 	normalizedOutputDir := utils.NormalizePath(outputDir)
 
-	cmd := exec.CommandContext(ctx, e.config.SuryaOCRPath,
+	cmd := exec.CommandContext(ctx, suryaOCRPath,
 		"--output_dir", normalizedOutputDir,
 		normalizedImagePath)
 

@@ -3,6 +3,7 @@ package utils
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -132,6 +133,58 @@ func (p *PathUtils) GetExecutableName(baseName string) string {
 		return baseName + ".exe"
 	}
 	return baseName
+}
+
+// FindExecutableInShell uses shell to find executable, which loads user's complete PATH
+func (p *PathUtils) FindExecutableInShell(command string) (string, error) {
+	// First try the standard exec.LookPath
+	if path, err := exec.LookPath(command); err == nil {
+		return path, nil
+	}
+
+	// If that fails, try using shell's which/where command
+	var cmd *exec.Cmd
+
+	switch constants.CurrentOS {
+	case "windows":
+		// Use 'where' command on Windows
+		cmd = exec.Command("cmd", "/c", "where", command)
+	default:
+		// Use shell with 'which' command on Unix-like systems
+		// This will load the user's shell configuration and PATH
+		shell := os.Getenv("SHELL")
+		if shell == "" {
+			shell = "/bin/sh"
+		}
+		cmd = exec.Command(shell, "-c", "which "+command)
+	}
+
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("command '%s' not found in PATH", command)
+	}
+
+	path := strings.TrimSpace(string(output))
+	if path == "" {
+		return "", fmt.Errorf("command '%s' not found in PATH", command)
+	}
+
+	// Return the first path if multiple paths are returned
+	lines := strings.Split(path, "\n")
+	firstPath := strings.TrimSpace(lines[0])
+
+	// Verify the found path is actually executable
+	if !p.IsExecutable(firstPath) {
+		return "", fmt.Errorf("command '%s' found but not executable: %s", command, firstPath)
+	}
+
+	return firstPath, nil
+}
+
+// IsCommandAvailable checks if a command is available using shell detection
+func (p *PathUtils) IsCommandAvailable(command string) bool {
+	_, err := p.FindExecutableInShell(command)
+	return err == nil
 }
 
 // ExpandPath expands environment variables and user home directory in path

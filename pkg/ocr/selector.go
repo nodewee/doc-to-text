@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"strconv"
 	"strings"
 
 	"github.com/nodewee/doc-to-text/pkg/config"
@@ -14,7 +13,7 @@ import (
 	"github.com/nodewee/doc-to-text/pkg/types"
 )
 
-// DefaultOCRSelector implements OCR tool selection
+// DefaultOCRSelector implements OCRSelector interface
 type DefaultOCRSelector struct {
 	config  *config.Config
 	logger  *logger.Logger
@@ -29,7 +28,7 @@ func NewOCRSelector(cfg *config.Config, log *logger.Logger) interfaces.OCRSelect
 		engines: make(map[types.OCRStrategy]interfaces.OCREngine),
 	}
 
-	// Register available OCR engines
+	// Register all OCR engines (no availability check)
 	selector.engines[types.OCRStrategyLLMCaller] = engines.NewLLMCallerEngine(cfg, log)
 	selector.engines[types.OCRStrategySuryaOCR] = engines.NewSuryaOCREngine(cfg, log)
 
@@ -38,151 +37,100 @@ func NewOCRSelector(cfg *config.Config, log *logger.Logger) interfaces.OCRSelect
 
 // SelectOCRStrategy selects an OCR tool, either from config or interactively
 func (s *DefaultOCRSelector) SelectOCRStrategy(strategy types.OCRStrategy) (interfaces.OCREngine, error) {
-	// If interactive mode is requested, check if we should auto-select for text content type
+	s.logger.Debug("Selecting OCR strategy: %s", strategy)
+
+	// Handle interactive strategy
 	if strategy == types.OCRStrategyInteractive {
-		// If content type is text, auto-select the first available OCR tool instead of prompting
-		if s.config.ContentType == types.ContentTypeText {
-			s.logger.Info("Content type is 'text', auto-selecting OCR tool for fallback processing")
-			available := s.GetAvailableStrategies()
-			if len(available) == 0 {
-				return nil, fmt.Errorf("no OCR engines are available on this system")
-			}
+		selectedStrategy, err := s.PromptUserSelection()
+		if err != nil {
+			return nil, fmt.Errorf("failed to select OCR strategy interactively: %w", err)
+		}
+		strategy = selectedStrategy
 
-			// Prefer Surya OCR for text content fallback (faster and more suitable)
-			for _, availableStrategy := range available {
-				if availableStrategy == types.OCRStrategySuryaOCR {
-					strategy = availableStrategy
-					tool := s.engines[strategy]
-					s.logger.Info("Auto-selected preferred OCR tool for text content fallback: %s", tool.GetDescription())
-					break
-				}
-			}
-
-			// If Surya OCR is not available, use the first available tool
-			if strategy == types.OCRStrategyInteractive {
-				strategy = available[0]
-				tool := s.engines[strategy]
-				s.logger.Info("Auto-selected OCR tool for text content fallback: %s", tool.GetDescription())
-			}
-		} else {
-			// For image content type or other cases, use interactive selection
-			selectedStrategy, err := s.PromptUserSelection()
+		// If LLM Caller is selected interactively, prompt for template
+		if strategy == types.OCRStrategyLLMCaller && s.config.LLMTemplate == "" {
+			reader := bufio.NewReader(os.Stdin)
+			template, err := s.promptForLLMTemplate(reader)
 			if err != nil {
-				return nil, fmt.Errorf("failed to select OCR tool: %w", err)
+				return nil, fmt.Errorf("failed to get LLM template: %w", err)
 			}
-			strategy = selectedStrategy
+			s.config.LLMTemplate = template
 		}
 	}
 
-	// Get the tool for the selected tool
-	tool, exists := s.engines[strategy]
+	// Get the engine for the selected strategy
+	engine, exists := s.engines[strategy]
 	if !exists {
-		return nil, fmt.Errorf("unknown OCR tool: %s", strategy)
+		return nil, fmt.Errorf("unsupported OCR strategy: %s", strategy)
 	}
 
-	// Check if the tool is available
-	if !tool.IsAvailable() {
-		return nil, fmt.Errorf("OCR tool '%s' is not available on this system", tool.Name())
-	}
-
-	s.logger.Info("Selected OCR tool: %s", tool.GetDescription())
-	return tool, nil
+	s.logger.Info("Selected OCR engine: %s (%s)", engine.Name(), engine.GetDescription())
+	return engine, nil
 }
 
-// GetAvailableStrategies returns all available OCR strategies
+// GetAvailableStrategies returns all OCR strategies (no availability check)
 func (s *DefaultOCRSelector) GetAvailableStrategies() []types.OCRStrategy {
-	var available []types.OCRStrategy
-
-	for strategy, tool := range s.engines {
-		if tool.IsAvailable() {
-			available = append(available, strategy)
-		}
+	strategies := make([]types.OCRStrategy, 0, len(s.engines))
+	for strategy := range s.engines {
+		strategies = append(strategies, strategy)
 	}
+	return strategies
+}
 
-	return available
+// GetAllStrategies returns all possible OCR strategies
+func (s *DefaultOCRSelector) GetAllStrategies() []types.OCRStrategy {
+	return []types.OCRStrategy{
+		types.OCRStrategyLLMCaller,
+		types.OCRStrategySuryaOCR,
+	}
 }
 
 // PromptUserSelection prompts user to select an OCR tool interactively
 func (s *DefaultOCRSelector) PromptUserSelection() (types.OCRStrategy, error) {
-	fmt.Println("\n🔍 OCR Tool Selection")
-	fmt.Println("========================")
+	fmt.Println("\n🔧 OCR Tool Selection")
+	fmt.Println("=====================")
+	fmt.Println("Please select an OCR tool:")
+	fmt.Println("  1. llm-caller   - AI-powered OCR with configurable models")
+	fmt.Println("  2. surya_ocr    - Local OCR tool with multilingual support")
+	fmt.Printf("\nSelect OCR tool (1-2) [default: 2 (surya_ocr)]: ")
 
-	// Get available strategies
-	available := s.GetAvailableStrategies()
-
-	if len(available) == 0 {
-		return "", fmt.Errorf("no OCR engines are available on this system")
-	}
-
-	// Display options
-	fmt.Println("Available OCR engines:")
-	for i, strategy := range available {
-		tool := s.engines[strategy]
-		fmt.Printf("  %d. %s\n", i+1, tool.GetDescription())
-	}
-
-	// Get user input
 	reader := bufio.NewReader(os.Stdin)
-	for {
-		fmt.Printf("\nSelect OCR tool (1-%d): ", len(available))
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return "", fmt.Errorf("error reading input: %w", err)
-		}
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read user input: %w", err)
+	}
 
-		input = strings.TrimSpace(input)
-		choice, err := strconv.Atoi(input)
-		if err != nil || choice < 1 || choice > len(available) {
-			fmt.Printf("Invalid choice. Please enter a number between 1 and %d.\n", len(available))
-			continue
-		}
+	input = strings.TrimSpace(input)
 
-		selectedStrategy := available[choice-1]
-		tool := s.engines[selectedStrategy]
-		fmt.Printf("✅ Selected: %s\n", tool.GetDescription())
-
-		// If LLM Caller is selected, prompt for template
-		if selectedStrategy == types.OCRStrategyLLMCaller {
-			template, err := s.promptForLLMTemplate(reader)
-			if err != nil {
-				return "", fmt.Errorf("failed to get LLM template: %w", err)
-			}
-			// Update the configuration with the provided template
-			s.config.LLMTemplate = template
-			fmt.Printf("✅ LLM Template set: %s\n", template)
-		}
-
-		fmt.Println()
-		return selectedStrategy, nil
+	// Default to surya_ocr (option 2)
+	if input == "" || input == "2" {
+		fmt.Println("✅ Selected: surya_ocr")
+		return types.OCRStrategySuryaOCR, nil
+	} else if input == "1" {
+		fmt.Println("✅ Selected: llm-caller")
+		return types.OCRStrategyLLMCaller, nil
+	} else {
+		fmt.Println("❌ Invalid choice, using default: surya_ocr")
+		return types.OCRStrategySuryaOCR, nil
 	}
 }
 
-// promptForLLMTemplate prompts user to input LLM template for llm-caller
+// promptForLLMTemplate prompts user for LLM template
 func (s *DefaultOCRSelector) promptForLLMTemplate(reader *bufio.Reader) (string, error) {
-	fmt.Println("\n📝 LLM Template Configuration")
-	fmt.Println("=============================")
-	fmt.Println("LLM Caller requires a template to specify which AI model to use.")
-	fmt.Println("Examples: qwen-vl-ocr, gpt-4-vision, claude-vision, etc.")
+	fmt.Printf("\n📝 LLM Template Selection\n")
+	fmt.Printf("========================\n")
+	fmt.Printf("Please enter LLM template name for llm-caller: ")
 
-	for {
-		fmt.Print("\nEnter LLM template name: ")
-		input, err := reader.ReadString('\n')
-		if err != nil {
-			return "", fmt.Errorf("error reading template input: %w", err)
-		}
-
-		template := strings.TrimSpace(input)
-		if template == "" {
-			fmt.Println("❌ Template name cannot be empty. Please enter a valid template name.")
-			continue
-		}
-
-		// Basic validation - template should not contain spaces or special characters
-		if strings.ContainsAny(template, " \t\n\r") {
-			fmt.Println("❌ Template name should not contain spaces. Please enter a valid template name.")
-			continue
-		}
-
-		return template, nil
+	input, err := reader.ReadString('\n')
+	if err != nil {
+		return "", fmt.Errorf("failed to read template input: %w", err)
 	}
+
+	template := strings.TrimSpace(input)
+	if template == "" {
+		return "", fmt.Errorf("LLM template name is required")
+	}
+
+	fmt.Printf("✅ Using LLM template: %s\n", template)
+	return template, nil
 }

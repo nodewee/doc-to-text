@@ -45,9 +45,9 @@ func NewFileProcessor(cfg *config.Config, log *logger.Logger) interfaces.FilePro
 	processor.setupErrorRecovery()
 
 	log.Info("File processor initialized with configuration:")
-	log.Info("  Tool paths loaded from: ~/.doc-to-text/config.json")
+	log.Info("  Runtime settings applied from environment variables and command line")
 	log.Info("  Skip existing: %v", cfg.SkipExisting)
-	log.Info("  Temp directory: using input file directory with MD5 hash")
+	log.Info("  Output directory: using input file directory with MD5 hash")
 	log.Info("  Max concurrency: %d", cfg.MaxConcurrency)
 	log.Info("  Min text threshold: %d", cfg.MinTextThreshold)
 
@@ -239,6 +239,9 @@ func (p *DefaultFileProcessor) attemptExtractionWithFallbacks(ctx context.Contex
 	ext := strings.ToLower(filepath.Ext(inputFile))
 	isPDF := ext == ".pdf"
 
+	// Check if user explicitly chose a specific OCR strategy
+	userChosenOCR := p.config.OCRStrategy != types.OCRStrategyInteractive
+
 	for i, extractor := range extractors {
 		extractorName := extractor.Name()
 		attemptedExtractors = append(attemptedExtractors, extractorName)
@@ -278,6 +281,18 @@ func (p *DefaultFileProcessor) attemptExtractionWithFallbacks(ctx context.Contex
 					Source:              inputFile,
 					ExtractorUsed:       "",
 					Error:               fmt.Sprintf("OCR extraction failed for image-based PDF: %v", err),
+					FallbackUsed:        false,
+					AttemptedExtractors: attemptedExtractors,
+				}, err
+			}
+
+			// If user explicitly chose an OCR strategy and OCR failed, don't fallback
+			if userChosenOCR && extractorName == "ocr" {
+				p.logger.Error("OCR failed for user-chosen strategy (%s). No fallback will be attempted.", p.config.OCRStrategy)
+				return &interfaces.ExtractionResult{
+					Source:              inputFile,
+					ExtractorUsed:       "",
+					Error:               fmt.Sprintf("OCR extraction failed for chosen strategy %s: %v", p.config.OCRStrategy, err),
 					FallbackUsed:        false,
 					AttemptedExtractors: attemptedExtractors,
 				}, err

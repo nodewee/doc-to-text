@@ -48,8 +48,3 @@ func (e *TextFileExtractor) SupportsFile(fileInfo *types.FileInfo) bool {
 func (e *TextFileExtractor) Name() string {
 	return e.name
 }
-
-// GetCacheKey returns a unique cache key for the file
-func (e *TextFileExtractor) GetCacheKey(fileInfo *types.FileInfo) string {
-	return fmt.Sprintf("text-%s", fileInfo.MD5Hash)
-}

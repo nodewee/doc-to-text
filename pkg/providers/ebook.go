@@ -5,16 +5,17 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
+	"strings"
 
 	"github.com/nodewee/doc-to-text/pkg/config"
+	"github.com/nodewee/doc-to-text/pkg/constants"
 	"github.com/nodewee/doc-to-text/pkg/interfaces"
 	"github.com/nodewee/doc-to-text/pkg/logger"
 	"github.com/nodewee/doc-to-text/pkg/types"
 	"github.com/nodewee/doc-to-text/pkg/utils"
 )
 
-// EbookExtractor handles e-book files using Calibre
+// EbookExtractor extracts text from e-books using Calibre
 type EbookExtractor struct {
 	name        string
 	config      *config.Config
@@ -31,53 +32,88 @@ func NewEbookExtractor(cfg *config.Config, log *logger.Logger) interfaces.Extrac
 	}
 }
 
-// Extract extracts text from e-book files
-func (e *EbookExtractor) Extract(ctx context.Context, inputFile string) (string, error) {
-	e.logger.Progress("📚", "Processing e-book with Calibre: %s", filepath.Base(inputFile))
-	e.logger.Debug("E-book extraction started for: %s", inputFile)
+// findCalibrePath attempts to find the Calibre ebook-convert command
+func (e *EbookExtractor) findCalibrePath() (string, error) {
+	// Try to find ebook-convert using shell detection
+	if foundPath, err := utils.DefaultPathUtils.FindExecutableInShell("ebook-convert"); err == nil {
+		e.logger.Debug("Found ebook-convert at: %s", foundPath)
+		return foundPath, nil
+	}
 
-	// Get file info for MD5 hash to initialize temp manager
-	fileInfo, err := utils.GetFileInfo(inputFile)
+	// Common installation paths based on platform
+	platformConfig := constants.GetPlatformConfig()
+	for _, path := range platformConfig.CalibrePaths {
+		if utils.DefaultPathUtils.IsCommandAvailable(path) {
+			e.logger.Debug("Found ebook-convert at common path: %s", path)
+			return path, nil
+		}
+	}
+
+	return "", fmt.Errorf("Calibre ebook-convert command not found. Please install Calibre first:\n" +
+		"  - macOS: brew install calibre\n" +
+		"  - Ubuntu/Debian: sudo apt-get install calibre\n" +
+		"  - Windows: Download from https://calibre-ebook.com/download\n" +
+		"  or visit: https://calibre-ebook.com for installation instructions")
+}
+
+// Extract extracts text from e-books using Calibre
+func (e *EbookExtractor) Extract(ctx context.Context, inputFile string) (string, error) {
+	e.logger.Info("Extracting text from e-book: %s", inputFile)
+
+	// Find Calibre command at execution time
+	calibrePath, err := e.findCalibrePath()
 	if err != nil {
-		return "", fmt.Errorf("failed to get file info for temp manager: %w", err)
+		return "", err
 	}
 
 	// Initialize temp manager if not already done
 	if e.tempManager == nil {
-		e.tempManager = e.config.CreateTempFileManager(inputFile, fileInfo.MD5Hash, e.logger)
+		md5Hash, err := utils.CalculateFileMD5(inputFile)
+		if err != nil {
+			return "", fmt.Errorf("failed to calculate file hash: %w", err)
+		}
+		e.tempManager = e.config.CreateTempFileManager(inputFile, md5Hash, e.logger)
 	}
 
-	// Create temporary output file
-	outputFile, err := e.tempManager.CreateTempFile("ebook", ".txt")
+	var result string
+	err = e.tempManager.WithCleanup(func() error {
+		// Create temporary output file
+		outputFile, err := e.tempManager.CreateTempFile("ebook_output_", ".txt")
+		if err != nil {
+			return fmt.Errorf("failed to create temp output file: %w", err)
+		}
+
+		// Run Calibre ebook-convert
+		cmd := exec.CommandContext(ctx, calibrePath, inputFile, outputFile)
+		e.logger.Debug("Running Calibre command: %s", cmd.String())
+
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			e.logger.Error("Calibre e-book conversion failed: %s", string(output))
+			return fmt.Errorf("calibre e-book conversion failed: %w", err)
+		}
+
+		// Read the converted text
+		content, err := os.ReadFile(outputFile)
+		if err != nil {
+			return fmt.Errorf("failed to read Calibre output: %w", err)
+		}
+
+		text := strings.TrimSpace(string(content))
+		if len(text) < e.config.MinTextThreshold {
+			return fmt.Errorf("extracted text is too short (%d chars, minimum %d)", len(text), e.config.MinTextThreshold)
+		}
+
+		result = text
+		e.logger.Debug("E-book extraction successful: %d characters", len(text))
+		return nil
+	})
+
 	if err != nil {
-		return "", fmt.Errorf("failed to create temporary output file: %w", err)
+		return "", err
 	}
 
-	e.logger.Debug("Created temporary output file: %s", outputFile)
-
-	// Run calibre's ebook-convert
-	e.logger.Debug("Running calibre ebook-convert: %s -> %s", inputFile, outputFile)
-	cmd := exec.CommandContext(ctx, e.config.CalibrePath, inputFile, outputFile)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		e.logger.Error("ebook-convert failed: %s", string(output))
-		return "", fmt.Errorf("ebook-convert failed: %w", err)
-	}
-
-	e.logger.Debug("Calibre conversion completed successfully")
-
-	// Read the converted text
-	content, err := os.ReadFile(outputFile)
-	if err != nil {
-		e.logger.Error("Failed to read converted ebook file: %v", err)
-		return "", fmt.Errorf("error reading converted ebook: %w", err)
-	}
-
-	textLen := len(content)
-	e.logger.Debug("Read %d bytes from converted file", textLen)
-	e.logger.Progress("✅", "E-book conversion completed successfully (%d characters)", textLen)
-
-	return string(content), nil
+	return result, nil
 }
 
 // SupportsFile checks if this extractor supports the given file type
@@ -88,9 +124,4 @@ func (e *EbookExtractor) SupportsFile(fileInfo *types.FileInfo) bool {
 // Name returns the name of the extractor
 func (e *EbookExtractor) Name() string {
 	return e.name
-}
-
-// GetCacheKey returns a unique cache key for the file
-func (e *EbookExtractor) GetCacheKey(fileInfo *types.FileInfo) string {
-	return fmt.Sprintf("ebook-%s", fileInfo.MD5Hash)
 }
