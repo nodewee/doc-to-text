@@ -42,7 +42,7 @@ doc-to-text document.pdf
 
 # Use specific OCR tool
 doc-to-text document.pdf --ocr surya_ocr
-doc-to-text document.pdf --ocr llm-caller --llm_template qwen-vl-ocr
+doc-to-text document.pdf --ocr llm-caller --llm-template qwen-vl-ocr
 
 # Specify content processing strategy for PDFs
 doc-to-text document.pdf --content-type text    # Try Calibre first, OCR fallback
@@ -50,6 +50,11 @@ doc-to-text document.pdf --content-type image   # Direct OCR processing
 
 # Custom output
 doc-to-text document.pdf -o output.txt
+
+# Display and set language
+doc-to-text language
+# Switch language
+DOC_TEXT_LANG=zh doc-to-text -V
 
 # Version info
 doc-to-text --version    # Quick version
@@ -102,7 +107,7 @@ DOC_TEXT_MAX_CONCURRENCY=8 doc-to-text document.pdf
 
 ### [LLM Caller](https://github.com/nodewee/llm-caller) (Configurable AI)
 - **AI-powered** with template-based approach
-- **Requires**: `--llm_template` parameter
+- **Requires**: `--llm-template` parameter
 - **Best for**: Complex layouts, handwritten text, specific models
 
 ### Interactive Selection

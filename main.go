@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/nodewee/doc-to-text/cmd"
+	"doc-to-text/cmd"
 )
 
 // Version information - these will be set during build time via ldflags

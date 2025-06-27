@@ -27,7 +27,7 @@ doc-to-text document.pdf
 
 # Specific OCR tool
 doc-to-text document.pdf --ocr surya_ocr
-doc-to-text document.pdf --ocr llm-caller --llm_template qwen-vl-ocr
+doc-to-text document.pdf --ocr llm-caller --llm-template qwen-vl-ocr
 
 # Content processing strategy
 doc-to-text document.pdf --content-type text    # Try Calibre first, OCR fallback
@@ -81,7 +81,7 @@ DOC_TEXT_MAX_CONCURRENCY=8 doc-to-text document.pdf
 ### LLM Caller (AI-Powered)
 - **Installation**: Follow llm-caller setup guide
 - **Best for**: Complex layouts, configurable AI models
-- **Usage**: `--ocr llm-caller --llm_template qwen-vl-ocr`
+- **Usage**: `--ocr llm-caller --llm-template qwen-vl-ocr`
 
 ### Interactive Mode
 - **Default**: Prompts to choose available tools

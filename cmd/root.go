@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/nodewee/doc-to-text/pkg/config"
-	"github.com/nodewee/doc-to-text/pkg/constants"
-	"github.com/nodewee/doc-to-text/pkg/core"
-	"github.com/nodewee/doc-to-text/pkg/interfaces"
-	"github.com/nodewee/doc-to-text/pkg/logger"
-	"github.com/nodewee/doc-to-text/pkg/types"
-	"github.com/nodewee/doc-to-text/pkg/utils"
+	"doc-to-text/pkg/config"
+	"doc-to-text/pkg/constants"
+	"doc-to-text/pkg/core"
+	"doc-to-text/pkg/interfaces"
+	"doc-to-text/pkg/logger"
+	"doc-to-text/pkg/types"
+	"doc-to-text/pkg/utils"
 
 	"github.com/spf13/cobra"
 )
@@ -90,7 +90,7 @@ func (h *AppHandler) applyCommandLineOverrides() {
 
 		// Validate LLM template parameter
 		if h.config.OCRStrategy == types.OCRStrategyLLMCaller && llmTemplate == "" {
-			log.Fatalf("Error: --llm_template is required when using --ocr llm-caller")
+			log.Fatalf("Error: LLM template is required when using llm-caller OCR strategy")
 		}
 		h.config.LLMTemplate = llmTemplate
 	}
@@ -121,7 +121,7 @@ func (h *AppHandler) applyCommandLineOverrides() {
 }
 
 // shouldSkipContentTypePrompt checks whether to skip content type prompting
-// For pure text documents and HTML documents, no need to ask for content type
+// For pure text documents, HTML documents, e-books, and image files, no need to ask for content type
 func (h *AppHandler) shouldSkipContentTypePrompt() bool {
 	// This method is called before initialization, so we need to temporarily get file info
 	if len(os.Args) < 2 {
@@ -139,7 +139,7 @@ func (h *AppHandler) shouldSkipContentTypePrompt() bool {
 		ext = ext[1:] // Remove the dot
 	}
 
-	// Check if it's a pure text document or HTML document
+	// Check if it's a pure text document, HTML document, e-book, or image file
 	switch ext {
 	case "txt", "md", "markdown", "json", "xml", "csv", "py", "js", "ts", "c", "cpp", "h", "java", "sh":
 		// Pure text documents
@@ -150,8 +150,11 @@ func (h *AppHandler) shouldSkipContentTypePrompt() bool {
 	case "epub", "mobi":
 		// E-book documents
 		return true
+	case "jpg", "jpeg", "png", "gif", "bmp", "svg", "webp", "tiff", "tif":
+		// Image files - automatically use image content type
+		return true
 	default:
-		// Other document types (like PDF, images) need prompting
+		// Other document types (like PDF) need prompting
 		return false
 	}
 }
@@ -160,10 +163,15 @@ func (h *AppHandler) shouldSkipContentTypePrompt() bool {
 func (h *AppHandler) processFile(inputFile string) (*interfaces.ExtractionResult, error) {
 	absPath, _ := filepath.Abs(inputFile)
 
-	// Determine output path
+	// Determine output path with early validation
 	outputFilePath, err := h.determineOutputPath(absPath)
 	if err != nil {
-		return nil, utils.WrapError(err, utils.ErrorTypeIO, "error determining output path")
+		return nil, utils.WrapError(err, utils.ErrorTypeValidation, "error determining output path")
+	}
+
+	// Validate the determined output path before processing
+	if err := h.validateOutputPath(outputFilePath); err != nil {
+		return nil, utils.WrapError(err, utils.ErrorTypeValidation, "output path validation failed")
 	}
 
 	// Create timeout context
@@ -192,31 +200,80 @@ func (h *AppHandler) processFile(inputFile string) (*interfaces.ExtractionResult
 // determineOutputPath determines the output file path
 func (h *AppHandler) determineOutputPath(inputPath string) (string, error) {
 	if outputPath != "" {
-		return filepath.Abs(outputPath)
+		// Convert to absolute path
+		absOutputPath, err := filepath.Abs(outputPath)
+		if err != nil {
+			return "", utils.WrapError(err, utils.ErrorTypeValidation, fmt.Sprintf("failed to resolve output path '%s'", outputPath))
+		}
+
+		// Check if the output path points to an existing directory
+		if info, err := os.Stat(absOutputPath); err == nil {
+			if info.IsDir() {
+				// User specified an existing directory - this is not allowed
+				return "", utils.NewValidationError(fmt.Sprintf("output path '%s' is a directory, please specify a file path", absOutputPath), nil)
+			}
+			// If it's an existing file, we'll overwrite it (this is intentional)
+		} else if err != nil && !os.IsNotExist(err) {
+			// If there's an error other than "not exist", report it
+			return "", utils.WrapError(err, utils.ErrorTypeIO, fmt.Sprintf("failed to check output path '%s'", absOutputPath))
+		}
+
+		// If the path doesn't exist or is a file, use it as-is
+		return absOutputPath, nil
 	}
 
 	// Use MD5 hash path
 	md5Hash, err := utils.CalculateFileMD5(inputPath)
 	if err != nil {
-		return "", utils.WrapError(err, utils.ErrorTypeIO, "error calculating MD5 hash")
+		return "", utils.WrapError(err, utils.ErrorTypeIO, "failed to calculate MD5 hash")
 	}
 
-	return h.config.GetTextFilePath(inputPath, md5Hash), nil
+	// Generate output path based on input directory and MD5 hash
+	inputDir := filepath.Dir(inputPath)
+	return filepath.Join(inputDir, md5Hash, "text.txt"), nil
+}
+
+// validateOutputPath validates the output file path
+func (h *AppHandler) validateOutputPath(outputPath string) error {
+	if outputPath == "" {
+		return utils.NewValidationError("output path cannot be empty", nil)
+	}
+
+	// Check if the output directory exists or can be created
+	outputDir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return utils.WrapError(err, utils.ErrorTypePermission, fmt.Sprintf("failed to create output directory '%s'", outputDir))
+	}
+
+	// Check if we can write to the output directory
+	testFile := filepath.Join(outputDir, ".write_test")
+	if err := os.WriteFile(testFile, []byte("test"), 0644); err != nil {
+		return utils.WrapError(err, utils.ErrorTypePermission, fmt.Sprintf("no write permission for output directory '%s'", outputDir))
+	}
+	os.Remove(testFile) // Clean up test file
+
+	// Validate the output filename if it's not a directory
+	outputFileName := filepath.Base(outputPath)
+	if err := utils.ValidatePath(outputFileName); err != nil {
+		return utils.WrapError(err, utils.ErrorTypeValidation, fmt.Sprintf("invalid output filename '%s'", outputFileName))
+	}
+
+	return nil
 }
 
 // displayResults displays processing results
 func (h *AppHandler) displayResults(result *interfaces.ExtractionResult) {
-	fmt.Printf("✅ Text extracted successfully\n")
+	fmt.Printf("✅ Text extraction completed successfully\n")
 	fmt.Printf("📊 Extractor used: %s\n", result.ExtractorUsed)
 	fmt.Printf("⏱️  Processing time: %dms\n", result.ProcessTime)
 
 	if result.FallbackUsed {
-		fmt.Printf("⚠️  Fallback extraction was used\n")
+		fmt.Printf("⚠️  Fallback extractor was used\n")
 		fmt.Printf("🔄 Attempted extractors: %v\n", result.AttemptedExtractors)
 	}
 
 	if len(result.Text) > 0 {
-		fmt.Printf("📝 Extracted text length: %d characters\n", len(result.Text))
+		fmt.Printf("📝 Text length: %d characters\n", len(result.Text))
 		h.showTextPreview(result.Text)
 	}
 }
@@ -228,18 +285,18 @@ func (h *AppHandler) showTextPreview(text string) {
 		if lastNewline := strings.LastIndex(preview, "\n"); lastNewline > 0 {
 			preview = preview[:lastNewline]
 		}
-		fmt.Printf("📄 Preview:---\n%s...\n---\n", preview)
+		fmt.Printf("📄 Preview: %s...\n", preview)
 	}
 }
 
 // promptForContentType interactively asks user to select content-type
 func (h *AppHandler) promptForContentType() (types.ContentType, error) {
-	fmt.Println("\n📄 Content Type Selection")
+	fmt.Printf("\n📄 Content Type Selection\n")
 	fmt.Println("==========================")
-	fmt.Println("Please select the content type of your document:")
-	fmt.Println("  1. image - Document contains image content, use OCR directly")
-	fmt.Println("  2. text  - Document contains text content, try Calibre first")
-	fmt.Printf("\nSelect content type (1-2) [default: 1 (image)]: ")
+	fmt.Printf("Please select PDF processing strategy:\n")
+	fmt.Printf("  1. image - Direct OCR processing (default for scanned documents)\n")
+	fmt.Printf("  2. text  - Calibre text extraction first, OCR fallback (fast for text-based PDFs)\n")
+	fmt.Printf("\nSelect option (1-2) [default: 1]: ")
 
 	var input string
 	fmt.Scanln(&input)
@@ -247,55 +304,40 @@ func (h *AppHandler) promptForContentType() (types.ContentType, error) {
 
 	// Default to image (option 1)
 	if input == "" || input == "1" {
-		fmt.Println("✅ Selected: image")
+		fmt.Printf("✅ Selected: image\n")
 		return types.ContentTypeImage, nil
 	} else if input == "2" {
-		fmt.Println("✅ Selected: text")
+		fmt.Printf("✅ Selected: text\n")
 		return types.ContentTypeText, nil
 	} else {
-		fmt.Println("❌ Invalid choice, using default: image")
+		fmt.Printf("❌ Invalid choice '%s', using default: image\n", input)
 		return types.ContentTypeImage, nil
 	}
 }
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
-	Use:   "doc-to-text [input_file]",
-	Short: "A CLI tool for extracting text from various document formats",
-	Long: `A comprehensive CLI tool for extracting text content from various document formats. Supports PDF, E-books (EPUB/MOBI), HTML/MHTML, images, and text files.
-
-Features:
-- Advanced OCR with configurable tools (LLM Caller, Surya OCR)
-- E-book conversion using Calibre (auto-detected)
-- HTML/MHTML text extraction with built-in parser
-- Text file direct reading
-- Cross-platform tool detection
-
-OCR Tools:
-- llm-caller: Use LLM Caller with specified template (requires --llm_template)
-- surya_ocr: Use Surya OCR (local OCR tool)
-- (not specified): Prompt user to select OCR tool interactively
-
-Tool Detection:
-- Tools are automatically detected when needed
-- No configuration file required
-- Clear error messages if tools are missing
-
-Content Type Selection:
-- When neither --ocr nor --content-type is specified, the tool will interactively prompt you to select the content type
-- Default selection is 'image' (press Enter for quick selection)
-
-Examples:
-  doc-to-text document.pdf                                        # Interactive content type and OCR selection
-  doc-to-text document.pdf --ocr llm-caller --llm_template qwen-vl-ocr  # Extract text using LLM Caller
-  doc-to-text document.pdf --ocr surya_ocr                       # Extract text using Surya OCR
-  doc-to-text document.pdf --content-type text                   # Try Calibre first, then auto-select OCR if failed
-  doc-to-text document.pdf --content-type image                  # Use OCR directly for image-based PDF
-  doc-to-text ebook.epub                                          # Convert e-book to text
-  doc-to-text image.png                                           # Extract text from image using OCR
-  doc-to-text document.pdf -o ./output.txt                       # Extract text to specific file path
-  doc-to-text document.pdf --verbose                             # Extract text with verbose progress output
-  doc-to-text document.pdf -v --ocr surya_ocr                    # Extract text with verbose output using Surya OCR`,
+	SilenceUsage: true,
+	Use:          "doc-to-text [input_file]",
+	Short:        "A CLI tool for extracting text from various document formats",
+	Long: "A CLI tool for extracting text from various document formats with configurable OCR capabilities.\n\n" +
+		"Features:\n" +
+		"- Multi-format support: PDF, Word, HTML, E-books, Images, and text files\n" +
+		"- Configurable OCR: LLM Caller (AI-powered) or Surya OCR (fast & multilingual)\n" +
+		"- Smart content strategy: Choose between text-first or image-first processing for PDFs\n" +
+		"- Interactive tool selection: Auto-detects available tools and prompts for selection\n" +
+		"- Cross-platform: macOS, Linux, Windows with automatic tool detection\n\n" +
+		"Examples:\n" +
+		"  doc-to-text document.pdf                                        # Interactive mode with tool selection\n" +
+		"  doc-to-text document.pdf --ocr llm-caller --llm-template qwen-vl-ocr  # Use LLM Caller with template\n" +
+		"  doc-to-text document.pdf --ocr surya_ocr                       # Use Surya OCR\n" +
+		"  doc-to-text document.pdf --content-type text                   # Text-first processing\n" +
+		"  doc-to-text document.pdf --content-type image                  # Image-first processing\n" +
+		"  doc-to-text ebook.epub                                          # Extract from e-book\n" +
+		"  doc-to-text image.png                                           # Extract from image\n" +
+		"  doc-to-text document.pdf -o ./output.txt                       # Custom output file\n" +
+		"  doc-to-text document.pdf --verbose                             # Enable verbose output\n" +
+		"  doc-to-text document.pdf -v --ocr surya_ocr                    # Verbose with Surya OCR",
 	Args: cobra.MaximumNArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
 		// Handle version flag
@@ -309,8 +351,24 @@ Examples:
 			return
 		}
 
+		inputFile := args[0]
+
+		// Early validation: Check if input is a directory
+		if fileInfo, err := os.Stat(inputFile); err == nil && fileInfo.IsDir() {
+			log.Fatalf("Error (validation): Input path '%s' is a directory, please specify a file", inputFile)
+		}
+
+		// Early validation: Check if output path (if specified) points to an existing directory
+		if outputPath != "" {
+			if absOutputPath, err := filepath.Abs(outputPath); err == nil {
+				if fileInfo, err := os.Stat(absOutputPath); err == nil && fileInfo.IsDir() {
+					log.Fatalf("Error (validation): Output path '%s' is a directory, please specify a file path", absOutputPath)
+				}
+			}
+		}
+
 		handler := NewAppHandler()
-		if err := handler.ProcessFile(args[0]); err != nil {
+		if err := handler.ProcessFile(inputFile); err != nil {
 			if appErr, ok := err.(*utils.AppError); ok {
 				log.Fatalf("Error (%s): %s", appErr.Type, appErr.Message)
 			} else {
@@ -322,7 +380,19 @@ Examples:
 
 // NewRootCmd creates and returns the root command
 func NewRootCmd() *cobra.Command {
+	// Update flag descriptions
+	updateFlagDescriptions()
 	return rootCmd
+}
+
+// updateFlagDescriptions updates flag descriptions
+func updateFlagDescriptions() {
+	rootCmd.Flags().Lookup("output").Usage = "Output file path"
+	rootCmd.Flags().Lookup("ocr").Usage = "OCR strategy (interactive, llm-caller, surya_ocr)"
+	rootCmd.Flags().Lookup("llm-template").Usage = "LLM template name (required for llm-caller)"
+	rootCmd.Flags().Lookup("content-type").Usage = "Content processing type (text, image)"
+	rootCmd.Flags().Lookup("verbose").Usage = "Enable verbose output"
+	rootCmd.Flags().Lookup("version").Usage = "Show version information"
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -334,17 +404,11 @@ func Execute() {
 }
 
 func init() {
-	// Add flags to root command
-	rootCmd.Flags().StringVarP(&outputPath, "output", "o", "",
-		"Output file path (default: {input_file_directory}/{md5_hash}/text.txt)")
-	rootCmd.Flags().StringVar(&ocrStrategy, "ocr", "",
-		"OCR tool (llm-caller, surya_ocr, interactive)")
-	rootCmd.Flags().StringVar(&llmTemplate, "llm_template", "",
-		"LLM template for LLM Caller OCR")
-	rootCmd.Flags().StringVar(&contentType, "content-type", "",
-		"Content type of the document (text, image). Default: image. 'text' tries Calibre first, then auto-selects OCR if failed (no interaction). 'image' uses OCR directly.")
-	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false,
-		"Enable verbose output to show progress information")
-	rootCmd.Flags().BoolVarP(&showVersion, "version", "V", false,
-		"Show version information")
+	// Initialize flags
+	rootCmd.Flags().StringVarP(&outputPath, "output", "o", "", "Output file path")
+	rootCmd.Flags().StringVar(&ocrStrategy, "ocr", "", "OCR strategy")
+	rootCmd.Flags().StringVar(&llmTemplate, "llm-template", "", "LLM template")
+	rootCmd.Flags().StringVar(&contentType, "content-type", "", "Content type")
+	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
+	rootCmd.Flags().BoolVarP(&showVersion, "version", "V", false, "Show version")
 }

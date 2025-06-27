@@ -33,12 +33,14 @@ func GetVersionInfo() (string, string, string, string) {
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version information",
-	Long: `Display version information for doc-to-text including:
-- Application version
-- Git commit hash
-- Build time
-- Build environment
-- Go version and platform information`,
+	Long: "A CLI tool for extracting text from various document formats with configurable OCR capabilities.\n\n" +
+		"Version Information:\n" +
+		"- Version\n" +
+		"- Git Commit\n" +
+		"- Build Time\n" +
+		"- Built By\n" +
+		"- Go Version\n" +
+		"- OS/Architecture",
 	Run: func(cmd *cobra.Command, args []string) {
 		showVersionInfo()
 	},
@@ -68,11 +70,11 @@ func showVersionInfo() {
 	if version != "dev" && !strings.Contains(version, "dev") && !strings.Contains(version, "+") {
 		fmt.Printf("🚀 Release Information:\n")
 		fmt.Printf("  This is a release build\n")
-		fmt.Printf("  Release Notes: https://github.com/nodewee/doc-to-text/releases/tag/%s\n", version)
+		fmt.Printf("  Release notes: https://github.com/yourorg/doc-to-text/releases/tag/%s\n", version)
 	} else {
 		fmt.Printf("🔧 Development Information:\n")
 		fmt.Printf("  This is a development build\n")
-		fmt.Printf("  Not intended for production use\n")
+		fmt.Printf("  Not for production use\n")
 	}
 }
 

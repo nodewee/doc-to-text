@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/nodewee/doc-to-text/pkg/interfaces"
-	"github.com/nodewee/doc-to-text/pkg/types"
-	"github.com/nodewee/doc-to-text/pkg/utils"
+	"doc-to-text/pkg/interfaces"
+	"doc-to-text/pkg/types"
+	"doc-to-text/pkg/utils"
 )
 
 // TextFileExtractor handles plain text files
@@ -33,7 +33,7 @@ func (e *TextFileExtractor) Extract(ctx context.Context, inputFile string) (stri
 
 	content, err := os.ReadFile(inputFile)
 	if err != nil {
-		return "", fmt.Errorf("error reading text file: %w", err)
+		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 
 	return string(content), nil

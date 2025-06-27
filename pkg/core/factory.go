@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/nodewee/doc-to-text/pkg/config"
-	"github.com/nodewee/doc-to-text/pkg/interfaces"
-	"github.com/nodewee/doc-to-text/pkg/logger"
-	"github.com/nodewee/doc-to-text/pkg/ocr"
-	"github.com/nodewee/doc-to-text/pkg/providers"
-	"github.com/nodewee/doc-to-text/pkg/types"
+	"doc-to-text/pkg/config"
+	"doc-to-text/pkg/interfaces"
+	"doc-to-text/pkg/logger"
+	"doc-to-text/pkg/ocr"
+	"doc-to-text/pkg/providers"
+	"doc-to-text/pkg/types"
 )
 
 // DefaultExtractorFactory implements ExtractorFactory
@@ -47,8 +47,7 @@ func (f *DefaultExtractorFactory) CreateExtractor(fileInfo *types.FileInfo) (int
 		}
 	}
 
-	return nil, fmt.Errorf("no suitable extractor found for file type: %s (MIME: %s)",
-		fileInfo.Extension, fileInfo.MimeType)
+	return nil, fmt.Errorf("no suitable extractor found for file type '%s' (MIME: %s)", fileInfo.Extension, fileInfo.MimeType)
 }
 
 // CreateExtractorWithFallbacks creates extractors with fallback options
@@ -91,15 +90,11 @@ func (f *DefaultExtractorFactory) CreateExtractorWithFallbacks(fileInfo *types.F
 	case ext == "pdf":
 		// PDF files - strategy depends on content type
 		if f.config.ContentType == types.ContentTypeText {
-			// Text content type: try Calibre first, then OCR if failed
-			f.logger.Debug("PDF with text content type: trying Calibre first, then OCR fallback")
+			// Text content type: only use Calibre, no OCR fallback
+			f.logger.Debug("PDF with text content type: using Calibre only, no OCR fallback")
 			if calibreExtractor, exists := f.extractors["calibre"]; exists {
 				extractors = append(extractors, calibreExtractor)
 				f.logger.Debug("Added Calibre extractor for text-based PDF: %s", ext)
-			}
-			if ocrExtractor, exists := f.extractors["ocr"]; exists {
-				extractors = append(extractors, ocrExtractor)
-				f.logger.Debug("Added OCR extractor as fallback for text-based PDF: %s", ext)
 			}
 		} else {
 			// Image content type (default): use OCR directly, no fallback
@@ -136,10 +131,10 @@ func (f *DefaultExtractorFactory) CreateExtractorWithFallbacks(fileInfo *types.F
 	}
 
 	if len(extractors) == 0 {
-		return nil, fmt.Errorf("no suitable extractors found for file type: %s", ext)
+		return nil, fmt.Errorf("no suitable extractors found for file type '%s'", ext)
 	}
 
-	f.logger.Info("Created extraction chain with %d extractors for file type: %s", len(extractors), ext)
+	f.logger.Info("Created extraction chain for filetype '%s' with %d extractors", ext, len(extractors))
 	return extractors, nil
 }
 

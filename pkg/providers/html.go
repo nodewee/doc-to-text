@@ -10,8 +10,8 @@ import (
 	"golang.org/x/net/html"
 	"golang.org/x/net/html/atom"
 
-	"github.com/nodewee/doc-to-text/pkg/interfaces"
-	"github.com/nodewee/doc-to-text/pkg/types"
+	"doc-to-text/pkg/interfaces"
+	"doc-to-text/pkg/types"
 )
 
 // HTMLExtractor handles HTML and MHTML files
@@ -37,7 +37,7 @@ func (e *HTMLExtractor) Extract(ctx context.Context, inputFile string) (string, 
 
 	content, err := os.ReadFile(inputFile)
 	if err != nil {
-		return "", fmt.Errorf("error reading HTML file: %w", err)
+		return "", fmt.Errorf("failed to read file: %w", err)
 	}
 
 	htmlContent := string(content)
@@ -50,7 +50,7 @@ func (e *HTMLExtractor) Extract(ctx context.Context, inputFile string) (string, 
 	// Parse and extract text from HTML
 	text, err := e.extractTextFromHTML(htmlContent)
 	if err != nil {
-		return "", fmt.Errorf("error parsing HTML: %w", err)
+		return "", fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
 	return text, nil
@@ -71,7 +71,7 @@ func (e *HTMLExtractor) Name() string {
 func (e *HTMLExtractor) extractTextFromHTML(htmlContent string) (string, error) {
 	doc, err := html.Parse(strings.NewReader(htmlContent))
 	if err != nil {
-		return "", fmt.Errorf("error parsing HTML: %w", err)
+		return "", fmt.Errorf("failed to parse HTML: %w", err)
 	}
 
 	var textBuilder strings.Builder

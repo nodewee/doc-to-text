@@ -1,338 +1,142 @@
 # Development Guide
 
-Development information for the Doc Text Extractor project.
+Development guide for the Doc Text Extractor project.
 
-## 📚 Documentation Links
-
-- **🏷️ [Version Management](VERSIONING.md)** - Build system, versioning, and release process
-- **🚀 [Quick Start](QUICKSTART.md)** - Installation and basic usage  
-- **📖 [User Guide](README.md)** - Complete usage documentation
-
-## 🏗️ Architecture Overview
-
-The project follows clean architecture with modular design and clear separation of concerns.
-
-### Project Structure
+## 🏗️ Project Structure
 
 ```
 doc-to-text/
 ├── cmd/                    # CLI commands
-│   ├── root.go            # Root command with content-type logic
-│   └── version.go         # Version display with build-time injection
 ├── pkg/
 │   ├── config/            # Runtime configuration
-│   ├── constants/         # Platform-specific constants
-│   ├── logger/            # Structured logging
-│   ├── interfaces/        # Clean interfaces design
-│   ├── types/             # OCR strategies and content types
-│   ├── utils/             # Cross-platform utilities
+│   ├── constants/         # Platform constants
 │   ├── core/              # Business logic
-│   │   ├── factory.go     # Extractor factory with fallback chains
-│   │   └── processor.go   # File processing workflow
-│   ├── providers/         # Format-specific extractors
+│   ├── providers/         # Format extractors
 │   └── ocr/               # OCR system
-│       ├── extractor.go   # Main OCR coordinator
-│       ├── selector.go    # Interactive tool selection
-│       └── engines/       # OCR engine implementations
-├── main.go                # Entry point with version injection
-└── build.sh               # Build script (see VERSIONING.md)
-```
-
-## 🎯 Key Design Patterns
-
-### 1. Strategy Pattern for OCR Tools
-
-```go
-type OCREngine interface {
-    Name() string
-    ExtractTextFromPDF(ctx context.Context, pdfPath string) (string, error)
-    ExtractTextFromImage(ctx context.Context, imagePath string) (string, error)
-    SupportsDirectPDF() bool
-    IsAvailable() bool
-}
-```
-
-### 2. Factory Pattern with Fallback Chains
-
-```go
-func (f *DefaultExtractorFactory) CreateExtractorWithFallbacks(fileInfo *types.FileInfo) ([]interfaces.Extractor, error) {
-    switch {
-    case ext == "pdf":
-        if f.config.ContentType == types.ContentTypeText {
-            // Text-first: Calibre → OCR fallback
-            extractors = append(extractors, calibreExtractor, ocrExtractor)
-        } else {
-            // Image-first: OCR only
-            extractors = append(extractors, ocrExtractor)
-        }
-    }
-}
-```
-
-### 3. Interactive Selection System
-
-```go
-func (s *DefaultOCRSelector) SelectOCRStrategy(strategy types.OCRStrategy) (interfaces.OCREngine, error) {
-    if strategy == types.OCRStrategyInteractive {
-        return s.PromptUserSelection()
-    }
-    // ... direct selection logic
-}
+├── main.go                # Entry point
+└── build.sh               # Build script
 ```
 
 ## 🔧 Core Components
 
-### Configuration System (`pkg/config/`)
+- **Configuration**: Environment-based runtime configuration
+- **OCR Processing**: Page-by-page PDF processing with multiple engines
+- **Extractor System**: Factory pattern with fallback chains
 
-**On-demand tool detection:**
-
-The system now uses on-demand tool detection instead of upfront configuration. Tools are detected when actually needed during execution.
-
-### OCR System Architecture (`pkg/ocr/`)
-
-**Page-by-page processing with resume capability:**
-
-```go
-func (e *OCRExtractor) extractFromPDFViaSinglePages(ctx context.Context, inputFile string, fileInfo *types.FileInfo) (map[string]interface{}, error) {
-    // Split PDF into single pages
-    totalPages, err := e.splitPDFIntoSinglePages(ctx, inputFile, pagesDir)
-    
-    // Process each page with resume capability
-    for pageNum := 1; pageNum <= totalPages; pageNum++ {
-        pageTextPath := e.intermediateManager.GetPageTextPath(pageNum)
-        if existingText, err := e.loadExistingPageText(pageTextPath, pageNum); err == nil {
-            continue // Skip already processed pages
-        }
-    }
-}
-```
-
-### Content Type Logic (`cmd/root.go`)
-
-**Smart content type detection:**
-
-```go
-func (h *AppHandler) shouldSkipContentTypePrompt() bool {
-    ext := strings.ToLower(filepath.Ext(inputFile))
-    switch ext {
-    case "txt", "md", "html", "epub":
-        return true // Skip prompt for text documents
-    default:
-        return false // Prompt for PDFs and images
-    }
-}
-```
-
-## 🚀 Adding New Features
-
-### Adding a New OCR Engine
-
-1. **Implement the OCREngine interface** in `pkg/ocr/engines/`:
-
-```go
-type NewOCREngine struct {
-    config              *config.Config
-    logger              *logger.Logger
-    intermediateManager interfaces.IntermediateFileManager
-}
-
-func (e *NewOCREngine) ExtractTextFromPDF(ctx context.Context, pdfPath string) (string, error) {
-    // Find tool at execution time
-    toolPath, err := e.findNewToolPath()
-    if err != nil {
-        return "", err
-    }
-    
-    // Implementation with intermediate file support
-    if e.intermediateManager != nil {
-        resultFile := e.intermediateManager.GetOCRDataPath()
-        if existingText, err := e.loadExistingResults(resultFile); err == nil {
-            return existingText, nil
-        }
-    }
-    // ... OCR logic
-}
-
-func (e *NewOCREngine) findNewToolPath() (string, error) {
-    // On-demand tool detection
-    if foundPath, err := utils.DefaultPathUtils.FindExecutableInShell("new-tool"); err == nil {
-        return foundPath, nil
-    }
-    // ... check common paths
-    return "", fmt.Errorf("new-tool not found. Please install...")
-}
-```
-
-2. **Register in selector** (`pkg/ocr/selector.go`):
-
-```go
-selector.engines[types.OCRStrategyNewEngine] = engines.NewNewOCREngine(cfg, log)
-```
-
-3. **Add strategy type** to `pkg/types/types.go`:
-
-```go
-const OCRStrategyNewEngine OCRStrategy = "new_engine"
-```
-
-### Adding a New File Type Extractor
-
-1. **Implement the Extractor interface** in `pkg/providers/`:
-
-```go
-func (e *NewFormatExtractor) SupportsFile(fileInfo *types.FileInfo) bool {
-    return fileInfo.Extension == "newformat"
-}
-```
-
-2. **Register in factory** (`pkg/core/factory.go`):
-
-```go
-f.RegisterExtractor("newformat", providers.NewNewFormatExtractor(f.config, f.logger))
-```
-
-## 🧪 Testing Strategy
-
-### Key Test Areas
-
-1. **OCR Engine Integration**: Test with mock engines
-2. **Content Type Logic**: Verify fallback chains
-3. **Cross-platform Paths**: Test tool detection
-4. **Resume Capability**: Test interrupted processing
-
-### Example Test Structure
-
-```go
-func TestOCRExtractor_ResumeCapability(t *testing.T) {
-    // Create partially processed state
-    // Verify resume continues from correct page
-    // Test completion detection
-}
-```
-
-## 🔍 Code Quality Standards
-
-### Project-Specific Guidelines
-
-1. **Error Wrapping**: Use `utils.WrapError` for context
-2. **Logging**: Use structured logging with progress indicators
-3. **Platform Handling**: Use `constants.GetPlatformConfig()`
-4. **Path Operations**: Use `utils.DefaultPathUtils` for cross-platform paths
-
-### Critical Error Handling
-
-```go
-func (e *OCRExtractor) processPageWithRetry(ctx context.Context, pagePDFPath string, displayPageNum int) (string, error) {
-    var pageText string
-    err := utils.WithRetry(func() error {
-        text, err := e.processPagePDFWithOCR(ctx, pagePDFPath, displayPageNum)
-        if err != nil {
-            return utils.WrapError(err, utils.ErrorTypeOCR, "page processing failed")
-        }
-        pageText = text
-        return nil
-    }, constants.DefaultMaxRetries, e.errorHandler)
-    return pageText, err
-}
-```
-
-## 🔧 Development Environment
-
-### Initial Setup
+## 🚀 Development Setup
 
 ```bash
-# Clone and setup
 git clone <repository-url>
 cd doc-to-text
 go mod download
-
-# Install development dependencies
-brew install ghostscript pandoc calibre  # macOS
-pip install surya-ocr
-
-# Build and test
-go build -o doc-to-text .
-go test ./...
-```
-
-### Development Workflow
-
-For build commands and version management, see **[VERSIONING.md](VERSIONING.md)**:
-
-```bash
-# Quick development build (see VERSIONING.md for details)
 ./build.sh local
-
-# Install for local testing  
-./install-bin.sh
 ```
 
-### Debugging
+## 📋 Code Guidelines
 
-```bash
-# Enable debug logging
-DOC_TEXT_LOG_LEVEL=debug ./doc-to-text document.pdf
+- Write code and comments in English
+- Keep functions focused and simple
+- Use structured error handling
+- Follow Go naming conventions
 
-# Test with debug logging  
-DOC_TEXT_LOG_LEVEL=debug ./doc-to-text document.pdf
+## 📊 Logging System
 
-# Test specific components
-go test ./pkg/ocr -v
-go test ./pkg/config -v
+### Logging Levels and Usage
+
+The application uses a structured logging system with different levels for various use cases:
+
+#### **ProgressAlways()** - Essential Progress Information
+- **Purpose**: Critical progress updates that users should always see
+- **When to use**: Major processing milestones, key status changes
+- **Visibility**: Always displayed regardless of verbose mode
+- **Examples**:
+  - OCR engine selection
+  - File processing start/completion
+  - Text extraction completion with timing
+  - Cache loading notifications
+
+#### **Progress()** - Detailed Progress Information  
+- **Purpose**: Detailed progress tracking for debugging and monitoring
+- **When to use**: Step-by-step processing details, intermediate steps
+- **Visibility**: Only displayed in verbose mode (`-v` flag)
+- **Examples**:
+  - Page-by-page processing details
+  - Directory creation notifications
+  - Individual file operations
+  - Cache hit details
+
+#### **Info()** - System Information
+- **Purpose**: System status and configuration details
+- **When to use**: Initialization info, configuration details, debug info
+- **Visibility**: Only displayed in verbose mode (`-v` flag)
+- **Examples**:
+  - Processor initialization
+  - Configuration settings
+  - File analysis details
+  - Extractor registration
+
+#### **Debug()** - Development Information
+- **Purpose**: Detailed debugging information for development
+- **When to use**: Internal operations, detailed error context
+- **Visibility**: Only displayed in debug mode
+- **Examples**:
+  - Command execution details
+  - Internal state changes
+  - Detailed error contexts
+
+### User Experience Examples
+
+#### Default Mode (no `-v` flag)
+```
+🔍 Attempting extraction with ocr (attempt 1/1)
+🔍 Using OCR engine: surya_ocr
+✅ Primary extractor 'ocr' succeeded!
+💾 Text saved to: output.txt
+✅ Text extraction completed successfully in 1234ms
 ```
 
-## 📋 Project-Specific Conventions
+#### Verbose Mode (with `-v` flag)
+```
+📋 === Starting file processing ===
+📂 Input file: document.pdf
+📤 Output file: output.txt
+[INFO] File processor initialized with configuration:
+[INFO] Runtime settings applied from environment and command line
+[INFO] File analysis completed:
+[INFO]   Extension: pdf
+[INFO]   MIME type: application/pdf
+🔍 Attempting extraction with ocr (attempt 1/1)
+📄 Using page-by-page processing for better control
+📂 Created pages directory: /tmp/pages
+🔍 Using OCR engine: surya_ocr
+✂️ Splitting PDF into individual pages...
+✅ Successfully split PDF into 5 pages
+📄 Processing page 1/5
+📄 Processing page 2/5
+...
+✅ Primary extractor 'ocr' succeeded!
+💾 Text saved to: output.txt
+✅ Text extraction completed successfully in 1234ms
+```
 
-### Configuration Management
+### Implementation Guidelines
 
-- **Tool paths**: On-demand detection at execution time  
-- **Runtime settings**: Environment variables only
-- **Platform awareness**: Uses `constants.GetPlatformConfig()`
+When adding new log messages:
 
-### File Organization
+1. **Choose the appropriate level**:
+   - Use `ProgressAlways()` for user-facing milestones
+   - Use `Progress()` for detailed step tracking
+   - Use `Info()` for system information
+   - Use `Debug()` for development details
 
-- **Intermediate files**: `{input_dir}/{md5_hash}/`
-- **Page processing**: `pages/page_N.pdf` and `pages/page_N.txt`
-- **OCR results**: Persistent in intermediate directories for resume capability
+2. **Include emoji icons** for better visual distinction:
+   - 🔍 Processing/searching
+   - ✅ Success/completion
+   - ⚠️ Warnings
+   - ❌ Errors
+   - 📂 File operations
+   - 💾 Save operations
+   - 🔄 Progress indicators
+   ```
 
-### OCR Processing Flow
-
-1. **File type detection**: Determine processing strategy based on extension
-2. **Tool selection**: Interactive prompt or configured OCR engine
-3. **PDF page splitting**: Split into single-page PDFs using Ghostscript
-4. **Parallel processing**: Process pages concurrently with worker pools
-5. **Resume handling**: Skip already completed pages automatically
-6. **Text aggregation**: Combine page results with page headers
-
-### Error Recovery Strategy
-
-- **Retry logic**: Automatic retry for transient failures
-- **Graceful fallback**: OCR → Calibre → Text extraction chains
-- **State preservation**: Intermediate files enable process resumption
-- **Context propagation**: Proper error context through utils.WrapError
-
-## 📚 Key Interfaces and Dependencies
-
-### Core Interfaces
-
-- `interfaces.OCREngine`: OCR tool abstraction with availability detection
-- `interfaces.Extractor`: File format extractor with support detection
-- `interfaces.ExtractorFactory`: Extractor creation with fallback chains
-- `interfaces.FileProcessor`: Main processing workflow with error handling
-
-### External Dependencies
-
-- **Ghostscript**: PDF processing, page splitting, format conversion
-- **Pandoc**: Office document conversion (DOC, PPT, XLS to text)
-- **Calibre**: E-book text extraction (EPUB, MOBI to text)
-- **OCR Tools**: Surya OCR (local), LLM Caller (via API)
-
-### Platform Considerations
-
-The project uses platform-aware tool detection and path handling:
-
-- **Windows**: Executable extensions (`.exe`), program files paths
-- **macOS**: Application bundles, Homebrew paths
-- **Linux**: Package manager paths, snap packages
-
-All cross-platform logic is centralized in `pkg/constants/platform.go` and `pkg/utils/path.go`. 
+3. **Maintain consistency** across different extractors and processors 
